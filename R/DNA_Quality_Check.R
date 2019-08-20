@@ -5,7 +5,7 @@ library(dplyr)
 library("frequency")
 library(httr)
 
-Hyena <-read.csv(text=GET("~/data/Hyena_DNA_Concentration.csv"))
+Hyena <-read.csv("~/GitProject/AA_Hyenas_Pakt/Data/Hyena_DNA_Concentration.csv")
 
 a <- ggplot(Hyena, aes(x=X260_280, y=DNA.conc, color= X260_230)) + 
   geom_point()+
