@@ -45,5 +45,5 @@ table(Hyena$DNA.conc >= 50 & Hyena$X260_280 >= 1.8 & Hyena$X260_230 >= 1.5)
 ##Just by amount of DNA
 table(Hyena$DNA.conc >= 50)
 
-##Potencialy to be concentrated
+##Potentialy to be concentrated
 table(Hyena$DNA.conc >= 30 & Hyena$DNA.conc < 50)
