@@ -76,15 +76,18 @@ c <- ggplot(Hyena, aes(x=P260_230_F, y=P260_280_F, color=DNA_conc_F)) +
   labs(tag = "C)")
 
 pdf("~/GitProject/AA_Hyenas_Pakt/Figures/Hyena_DNA_Concentration.pdf", width=14,height=20)
-grid.arrange(a, b, c, ncol=3)
+gridExtra::grid.arrange(a, b, c, ncol=3)
 dev.off()
 
 ###Randomization of samples 
+Hyena %>% 
+  add_row( Sample= 203:240) -> Hyena
+Hyena[203:240,]<- "Negative" ##Adding negative controls 
+Chip <- as.data.frame(split(Hyena$Sample, sample(5))) 
+colnames(Chip)<- c("Chip_1", "Chip_2", "Chip_3", "Chip_4", "Chip_5")
 
-#Chip <- as.data.frame(split(Hyena$Sample, sample(5))) 
-#colnames(Chip)<- c("Chip_1", "Chip_2", "Chip_3", "Chip_4", "Chip_5")
-#Chip[46:48,]<- c("N1_1", "N1_2", "N1_3")
+for (i in 1:ncol(Chip)) {
+  Chip[,i]<- sample(Chip[,i])
+}
 
-#for (i in 1:ncol(Chip)) {
-#  Chip[,i]<- sample(Chip[,i])
-#}
+#write.csv(Chip, "~/GitProjects/AA_Hyenas_Pakt/Data/Sample_distribution.csv")
