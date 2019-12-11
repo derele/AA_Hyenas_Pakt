@@ -43,9 +43,7 @@ Hyena_O %>% mutate(Action = case_when(DNA_Quality == "Low" & Purity_1 == "Low" &
 
 ##Now merged Original concentration with after speedvac concentration
 
-Hyena<- plyr::join(Hyena_O, Hyena_F, by= "Sample") %>%
-  distinct(Sample, .keep_all= T) %>%
-  filter(DNA_conc_F>=45)-> Hyena
+Hyena<- plyr::join(Hyena_O, Hyena_F, by= "Sample")
 
 a <- ggplot(Hyena, aes(x=P260_280_F, y=DNA_conc_F, color= P260_230_F)) + 
   geom_point()+
@@ -75,19 +73,34 @@ c <- ggplot(Hyena, aes(x=P260_230_F, y=P260_280_F, color=DNA_conc_F)) +
   ylab("Purity (260/280 ratio)")+
   labs(tag = "C)")
 
-pdf("~/GitProject/AA_Hyenas_Pakt/Figures/Hyena_DNA_Concentration.pdf", width=14,height=20)
+pdf("~/GitProjects/AA_Hyenas_Pakt/Figures/Hyena_DNA_Concentration.pdf", width=10,height=10)
 gridExtra::grid.arrange(a, b, c, ncol=3)
 dev.off()
 
-###Randomization of samples 
-Hyena %>% 
-  add_row( Sample= 203:240) -> Hyena
-Hyena[203:240,]<- "Negative" ##Adding negative controls 
-Chip <- as.data.frame(split(Hyena$Sample, sample(5))) 
-colnames(Chip)<- c("Chip_1", "Chip_2", "Chip_3", "Chip_4", "Chip_5")
+###Selection of samples
+Hyena %>% mutate(Final_selection = 
+                   case_when(DNA_conc_F >= 45.0 ~ "Selected")) -> Hyena
 
-for (i in 1:ncol(Chip)) {
-  Chip[,i]<- sample(Chip[,i])
-}
+table(Hyena$Final_selection == "Selected")
+
+#Hyena %>% 
+#  add_row(Sample= 203:240) -> Hyena
+#Hyena[203:240,]<- "Negative" ##Adding negative controls 
+#Chip <- as.data.frame(split(Hyena$Sample, sample(5))) 
+#colnames(Chip)<- c("Chip_1", "Chip_2", "Chip_3", "Chip_4", "Chip_5")
+
+#for (i in 1:ncol(Chip)) {
+#  Chip[,i]<- sample(Chip[,i])
+#}
 
 #write.csv(Chip, "~/GitProjects/AA_Hyenas_Pakt/Data/Sample_distribution.csv")
+
+##Add index information 
+Index_1 <-read.csv("~/AA_Hyena_Pakt/Index_Pool_1.csv") ##Pool 1 Dec 2019
+Index_2 <-read.csv("~/AA_Hyena_Pakt/Index_Pool_2.csv") ##Pool 2 Jan 2020
+Index<- merge(Index_1, Index_2, by= "Sample")
+
+rm(Hyena_F, Hyena_O, Index_1, Index_2)
+
+###Final data set with all information including negatives 
+Hyena<- full_join(Hyena, Index, by= "Sample")
