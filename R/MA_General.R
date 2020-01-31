@@ -40,7 +40,7 @@ samples <- gsub("_S\\d+_L001_R1_001.fastq\\.gz", "\\1", basename(fastqF))
 samples<- gsub("S\\d+_", "\\1", basename(samples))
 
 #Extra step in the pipeline: quality plots of the reads 
-## plotQualityProfile(fastqF[[1]]) ### Really low quality after 150bp :/ BUT it was a problem with 
+## plotQualityProfile(fastqF[[1]]) ### Really low quality after 150bp :/ for test run data 
 ## plotQualityProfile(fastqF[[200]])
 ## plotQualityProfile(fastqR[[1]])
 ## plotQualityProfile(fastqR[[200]])
