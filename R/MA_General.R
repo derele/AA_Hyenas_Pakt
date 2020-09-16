@@ -15,7 +15,7 @@ library(parallel)
 
 ## re-run or use pre-computed results for different parts of the pipeline:
 ## Set to FALSE to use pre-computed and saved results, TRUE to redo analyses.
-doFilter <- TRUE
+doFilter <- FALSE
 
 doMultiAmp <- TRUE
 
@@ -30,10 +30,15 @@ doTax <- TRUE
 
 ## change according to where you downloaded
 path <- "/SAN/Victors_playground/Metabarcoding/AA_Hyena/2018_22_Hyena_1/"
+path <- c(path, "/SAN/Victors_playground/Metabarcoding/AA_Hyena/2018_22_Hyena_2/2018_22_hyena_main_run/")
+path <- c(path, "/SAN/Victors_playground/Metabarcoding/AA_Hyena/2018_22_Hyena_2/2018_22_hyena2_run2/")
 
-fastqFiles <- list.files(path, pattern=".fastq.gz$", full.names=TRUE) #take all fastaq files from the folder 
-fastqF <- grep("_R1_001.fastq.gz", fastqFiles, value = TRUE) #separate the forward reads
-fastqR <- grep("_R2_001.fastq.gz", fastqFiles, value = TRUE) #separate the reverse reads 
+fastqList <- sapply(path, function (path) { 
+    fastqFiles <- list.files(path, pattern=".fastq.gz$", full.names=TRUE) #take all fastaq files from the folder 
+    fastqF <- grep("_R1_001.fastq.gz", fastqFiles, value = TRUE) #separate the forward reads
+    fastqR <- grep("_R2_001.fastq.gz", fastqFiles, value = TRUE) #separate the reverse reads
+    list(fastqF, fastqR)
+})
 
 
 samples <- gsub("_S\\d+_L001_R1_001.fastq\\.gz", "\\1", basename(fastqF))
