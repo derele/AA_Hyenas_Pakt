@@ -17,7 +17,7 @@ library(parallel)
 ## Set to FALSE to use pre-computed and saved results, TRUE to redo analyses.
 doFilter <- FALSE
 
-doMultiAmp <- TRUE
+doMultiAmp <- FALSE
 
 doTax <- TRUE
 ## But remember: if you change the MultiAmplicon Analysis, the
@@ -29,37 +29,83 @@ doTax <- TRUE
 ##These are the same steps that are followed by the DADA2 pipeline
 
 ## change according to where you downloaded
-path <- "/SAN/Victors_playground/Metabarcoding/AA_Hyena/2018_22_Hyena_1/"
-path <- c(path, "/SAN/Victors_playground/Metabarcoding/AA_Hyena/2018_22_Hyena_2/2018_22_hyena_main_run/")
-path <- c(path, "/SAN/Victors_playground/Metabarcoding/AA_Hyena/2018_22_Hyena_2/2018_22_hyena2_run2/")
 
-fastqList <- sapply(path, function (path) { 
+
+path <- c(
+    ## Hyena Pool 2 (Single amplicon run) 2nd Full sequencing Run (Good run)
+    "2018_22_hyena", 
+    ## Hyena Pool 1 (Multiamplicon run) Preliminary test sequencing Run
+    "2018_22_Hyena",
+    ## Hyena Pool 1 (Multiamplicon run) Extra sequencing Run for more reads 1
+    "2018_22_hyena1_extra3_part1",
+    ## Hyena Pool 1 (Multiamplicon run) Extra sequencing Run for more reads 2
+    "2018_22_hyena1_extra3_part2",
+    ## Hyena Pool 1 (Multiamplicon run) Extra sequencing Run for more reads 3
+    "2018_22_hyena1_extra3_part3",
+    ## Hyena Pool 2 (Single amplicon run) Preliminary test sequencing Run
+    "2018_22_hyena2_main_run_1",
+    ## Hyena Pool 2 (Single amplicon run) 1st Full sequencing Run (Susan report some problems and few reads)
+    "2018_22_hyena2_run2",
+    ## Hyena Pool 1 (Multiamplicon run) Full sequencing Run
+    "2018_22_hyena_main_run",
+    ## Hyena Pool 2 (Single amplicon run) Extra sequencing Run for more reads 
+    "2018_22_P2_extra") 
+
+
+fullpath <- paste0("/SAN/Victors_playground/Metabarcoding/AA_Hyena/", path)
+
+names(fullpath) <- path
+
+fastqList <- lapply(fullpath, function (path) { 
     fastqFiles <- list.files(path, pattern=".fastq.gz$", full.names=TRUE) #take all fastaq files from the folder 
     fastqF <- grep("_R1_001.fastq.gz", fastqFiles, value = TRUE) #separate the forward reads
     fastqR <- grep("_R2_001.fastq.gz", fastqFiles, value = TRUE) #separate the reverse reads
-    list(fastqF, fastqR)
+    list(fastqF=fastqF, fastqR=fastqR)
 })
 
 
-samples <- gsub("_S\\d+_L001_R1_001.fastq\\.gz", "\\1", basename(fastqF))
-samples<- gsub("S\\d+_", "\\1", basename(samples))
+samplesList <- lapply (fastqList, function (x){
+    samples <- gsub("_S\\d+_L001_R1_001.fastq\\.gz", "\\1", basename(x[["fastqF"]]))
+    gsub("S\\d+_", "\\1", basename(samples))
+})
 
-#Extra step in the pipeline: quality plots of the reads 
+# quality plots of the reads  to check how to trim and screen
 ## plotQualityProfile(fastqF[[1]]) ### Really low quality after 150bp :/ for test run data 
 ## plotQualityProfile(fastqF[[200]])
 ## plotQualityProfile(fastqR[[1]])
 ## plotQualityProfile(fastqR[[200]])
 
+readlenght <- lapply(fastqList, function (x) {
+    con <- file(x[["fastqF"]][1],"r")
+    ## first line
+    secondLine <- readLines(con, n=2)[[2]]
+    ### simple check whether it's V2 or V3 data
+    nchar(secondLine)
+})
+
+allFastq <- lapply(fastqList, function (x) {
+    readFastq(x[["fastqF"]])
+})
+
+
+
 #Creation of a folder for filtrated reads 
 filt_path <- "/SAN/Victors_playground/Metabarcoding/AA_Hyena/filtered_Hyena_1"
-#filt_path <- "/SAN/Victors_playground/Metabarcoding/AA_Hyena/filtered_Hyena_2"
+filt_path <- c(filt_path, "/SAN/Victors_playground/Metabarcoding/AA_Hyena/filtered_Hyena_2")
 
-#Pipeline filtration 
-if(!file_test("-d", filt_path)) dir.create(filt_path)
-filtFs <- file.path(filt_path, paste0(samples, "_F_filt.fastq.gz"))
-names(filtFs) <- samples
-filtRs <- file.path(filt_path, paste0(samples, "_R_filt.fastq.gz"))
-names(filtRs) <- samples
+
+
+#### TODO: WORK OUT WHETHER WE need to filter into two folders... probably not!!!
+# Filter and trim
+
+lapply(filt_path, function(filt_path) {
+    if(!file_test("-d", filt_path)) dir.create(filt_path)
+    filtFs <- file.path(filt_path, paste0(samples, "_F_filt.fastq.gz"))
+    names(filtFs) <- samples
+    filtRs <- file.path(filt_path, paste0(samples, "_R_filt.fastq.gz"))
+    names(filtRs) <- samples
+    list(filtFs=filtFs, filtRs=filtRs)
+})
 
 ## some files will be filtered out completely, therefore allowing 50
 ## files less present and still don't redo filtering
@@ -101,7 +147,8 @@ if(doMultiAmp){
   #filedir <- "/SAN/Victors_playground/Metabarcoding/AA_Hyena/stratified_Hyena_2"
   filedir <- "/SAN/Victors_playground/Metabarcoding/AA_Hyena/stratified_Hyena_1"
   if(dir.exists(filedir)) unlink(filedir, recursive=TRUE)
-  MA <- sortAmplicons(MA, n=1e+05, filedir=filedir) ## This step sort the reads into amplicons based on the number of primer pairs
+  ## This step sort the reads into amplicons based on the number of primer pairs
+  MA <- sortAmplicons(MA, n=1e+05, filedir=filedir) 
   
   errF <-  learnErrors(unlist(getStratifiedFilesF(MA)), nbase=1e8,
                        verbose=0, multithread = 12)
@@ -150,19 +197,15 @@ Sys.setenv("BLASTDB" = "/SAN/db/blastdb/") #To make the annotation work, boss wi
 
 
 MA <- blastTaxAnnot(MA,
-                    db = "/SAN/db/blastdb/",
+                    db = "/SAN/db/blastdb/nt",
                     negative_gilist = "/SAN/db/blastdb/uncultured.gi",
-                    infasta = "/SAN/Victors_playground/Metabarcoding/AA_Hyena/Hyena_1_in.fasta",
-                    outblast = "/SAN/Victors_playground/Metabarcoding/AA_Hyena/blast2_1_out.fasta",
+                    infasta = "/SAN/Metabarcoding/AA_Hyenas_EpiRank/Hyena_1_in.fasta",
+                    outblast = "/SAN/Metabarcoding/AA_Hyenas_EpiRank/blast2_1_out.fasta",
                     taxonSQL = "/SAN/db/taxonomy/taxonomizr.sql", 
                     num_threads = 20)
 
-###ERROR in taxassignment
-#BLAST Database error: No alias or index file found for nucleotide database [BLASTDB] in search path [/localstorage/victor:/SAN/db/blastdb:]
 
-#FINISHED running blast
-#Error in read.table(file = file, header = header, sep = sep, quote = quote,  : 
-#                     no lines available in input
+### TODO: fix blastTaxAnnot... somehow had to blast manually and read then
 
 #saveRDS(MA, file="/SAN/Victors_playground/Metabarcoding/AA_HMHZ/MA1_1Tax.Rds") ##Just Test run 
 
