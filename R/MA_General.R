@@ -63,18 +63,6 @@ fastqList <- lapply(fullpath, function (path) {
     list(fastqF=fastqF, fastqR=fastqR)
 })
 
-
-samplesList <- lapply (fastqList, function (x){
-    samples <- gsub("_S\\d+_L001_R1_001.fastq\\.gz", "\\1", basename(x[["fastqF"]]))
-    gsub("S\\d+_", "\\1", basename(samples))
-})
-
-# quality plots of the reads  to check how to trim and screen
-## plotQualityProfile(fastqF[[1]]) ### Really low quality after 150bp :/ for test run data 
-## plotQualityProfile(fastqF[[200]])
-## plotQualityProfile(fastqR[[1]])
-## plotQualityProfile(fastqR[[200]])
-
 readlenght <- lapply(fastqList, function (x) {
     con <- file(x[["fastqF"]][1],"r")
     ## first line
@@ -83,57 +71,120 @@ readlenght <- lapply(fastqList, function (x) {
     nchar(secondLine)
 })
 
-allFastq <- lapply(fastqList, function (x) {
+allFastqF <- lapply(fastqList, function (x) {
     readFastq(x[["fastqF"]])
 })
 
-
-
-#Creation of a folder for filtrated reads 
-filt_path <- "/SAN/Victors_playground/Metabarcoding/AA_Hyena/filtered_Hyena_1"
-filt_path <- c(filt_path, "/SAN/Victors_playground/Metabarcoding/AA_Hyena/filtered_Hyena_2")
-
-
-
-#### TODO: WORK OUT WHETHER WE need to filter into two folders... probably not!!!
-# Filter and trim
-
-lapply(filt_path, function(filt_path) {
-    if(!file_test("-d", filt_path)) dir.create(filt_path)
-    filtFs <- file.path(filt_path, paste0(samples, "_F_filt.fastq.gz"))
-    names(filtFs) <- samples
-    filtRs <- file.path(filt_path, paste0(samples, "_R_filt.fastq.gz"))
-    names(filtRs) <- samples
-    list(filtFs=filtFs, filtRs=filtRs)
+allFastqR <- lapply(fastqList, function (x) {
+    readFastq(x[["fastqR"]])
 })
 
-## some files will be filtered out completely, therefore allowing 50
-## files less present and still don't redo filtering
+
+sampleQual <- function (x) {
+    ## sample quality scores of 100,000 sequences 
+    qmat <- as(quality(x)[sample(100000)], "matrix")
+    cols <- seq(1, ncol(qmat), by=10)
+    sapply(cols, function (i) {
+        mean(qmat[, i], na.rm=TRUE)
+    })
+}
+
+qualityF <- lapply(allFastqF, sampleQual)
+qualityR <- lapply(allFastqR, sampleQual)
+
+shouldL <- max(unlist(lapply(quality, length)))
+
+qualityFilledF <- lapply(qualityF, function (x) {
+    c(x, rep(NA, times=shouldL - length(x)))
+})
+
+qualityFilledR <- lapply(qualityR, function (x) {
+    c(x, rep(NA, times=shouldL - length(x)))
+})
+
+
+qualityDFF <- Reduce("cbind",  qualityFilledF)
+qualityDFR <- Reduce("cbind",  qualityFilledR)
+
+colnames(qualityDFF) <- path
+colnames(qualityDFR) <- path
+
+qualityDFFL <- reshape2::melt(qualityDFF)
+qualityDFFL$direction <- "forward"
+
+qualityDFRL <- reshape2::melt(qualityDFR)
+qualityDFRL$direction <- "reverse"
+
+qualityDFL <- rbind(qualityDFFL, qualityDFRL)
+
+qualityDFL$position <- qualityDFL$Var1*10 -10
+
+ggplot(qualityDFL, aes(position, value, color=Var2)) +
+    geom_line() +
+    facet_wrap(~direction)
+
+## concluding from this that we can truncate at 220 and 200 for
+## reverse and forward respectively
+
+## concluding that we have to remove runs
+exclude_runs <-  c("2018_22_Hyena",
+                   "2018_22_hyena_main_run",
+                   "2018_22_hyena2_main_run_1")
+
+fastqList <- fastqList[!names(fastqList)%in%exclude_runs]
+
+samplesList <- lapply (fastqList, function (x){
+    samples <- gsub("_S\\d+_L001_R1_001.fastq\\.gz", "\\1", basename(x[["fastqF"]]))
+    paste(basename(dirname(x[["fastqF"]])), samples, sep="_-")
+})
+
+fastqFall <- unlist(lapply(fastqList, "[[", "fastqF"))
+fastqRall <- unlist(lapply(fastqList, "[[", "fastqR"))
+
+samplesAll <- unlist(samplesList)
+
+#Creation of a folder for filtrated reads 
+filt_path <- "/SAN/Victors_playground/Metabarcoding/AA_Hyena/filtered_Hyena_all"
+
+if(!file_test("-d", filt_path)) dir.create(filt_path)
+
+filtFs <- file.path(filt_path, paste0(samplesAll, "_F_filt.fastq.gz"))
+names(filtFs) <- samplesAll
+filtRs <- file.path(filt_path, paste0(samplesAll, "_R_filt.fastq.gz"))
+names(filtRs) <- samplesAll
+
 if(doFilter){
-  filter.track <- lapply(seq_along(fastqF),  function (i) {
-    filterAndTrim(fastqF[i], filtFs[i], fastqR[i], filtRs[i],
-                  truncLen=c(200,200), minLen=c(200,200), 
-                  maxN=0, maxEE=2, truncQ=2, 
-                  compress=TRUE, verbose=TRUE)
+  filter.track <- lapply(seq_along(fastqFall),  function (i) {
+      filterAndTrim(fastqFall[i], filtFs[i], fastqRall[i], filtRs[i],
+                    truncLen=c(220,200), minLen=c(220,200), 
+                    maxN=0, maxEE=2, truncQ=2, 
+                    compress=TRUE, verbose=TRUE)
   })
   saveRDS(filter.track, file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/filter.Rds")
 } else {
   filter.track <- readRDS(file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/filter.Rds")
 }
 
+## Error in filterAndTrim(fastqFall[i], filtFs[i], fastqRall[i], filtRs[i],  : 
+##   All output files must be distinct.
+## In addition: There were 50 or more warnings (use warnings() to see the first 50)
+
+
 ##Check the proportion of reads that passed the filtering 
-filter <- do.call(rbind, filter.track)
-colSums(filter)[2]/colSums(filter)[1]
+filter <- as.data.frame(do.call(rbind, filter.track))
+sum(filter[,"reads.out"])/sum(filter[,"reads.in"])
 
-###Uuuuu :S just 40% passed for the test run. 
+### Over 80% passed for all runs...
+filter$run <- unlist(lapply(strsplit(samplesAll, "_-"), "[", 1))
+by(filter, filter$run, function (x) sum(x[,"reads.out"]/sum(x[,"reads.in"])))
 
-names(filtFs) <- names(filtRs) <- samples
 files <- PairedReadFileSet(filtFs, filtRs)
 
 #Preparation of primer file ### Here stats the Multiamplicon pipeline from Emanuel
 
-#Primers used in the arrays 
-ptable <- read.csv(file = "/SAN/Victors_playground/Metabarcoding/AA_Hyena/primer_list.csv", sep=",", header=TRUE, stringsAsFactors=FALSE)
+#Primers used in the arrays, primer pairs in single processin are part of this
+ptable <- read.csv(file = "/SAN/Victors_playground/Metabarcoding/AA_Hyena/primer_list.csv",
+                   sep=",", header=TRUE, stringsAsFactors=FALSE)
 primerF <- ptable[, "Seq_F"]
 primerR <- ptable[, "Seq_R"]
 names(primerF) <- as.character(ptable[, "Name_F"])
@@ -144,11 +195,12 @@ primer <- PrimerPairsSet(primerF, primerR)
 ##Multi amplicon pipeline
 if(doMultiAmp){
   MA <- MultiAmplicon(primer, files)
-  #filedir <- "/SAN/Victors_playground/Metabarcoding/AA_Hyena/stratified_Hyena_2"
-  filedir <- "/SAN/Victors_playground/Metabarcoding/AA_Hyena/stratified_Hyena_1"
+  filedir <- "/SAN/Victors_playground/Metabarcoding/AA_Hyena/stratified_All"
   if(dir.exists(filedir)) unlink(filedir, recursive=TRUE)
   ## This step sort the reads into amplicons based on the number of primer pairs
   MA <- sortAmplicons(MA, n=1e+05, filedir=filedir) 
+
+  library(pheatap)
   
   errF <-  learnErrors(unlist(getStratifiedFilesF(MA)), nbase=1e8,
                        verbose=0, multithread = 12)
