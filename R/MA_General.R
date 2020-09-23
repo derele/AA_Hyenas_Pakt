@@ -17,9 +17,13 @@ library(parallel)
 ## Set to FALSE to use pre-computed and saved results, TRUE to redo analyses.
 doFilter <- FALSE
 
-doMultiAmp <- FALSE
+doMultiAmpSort <- FALSE
 
-doTax <- TRUE
+doMultiAmpError <- FALSE
+
+doMultiAmpPipe <- TRUE
+
+doTax <- FALSE
 ## But remember: if you change the MultiAmplicon Analysis, the
 ## taxonomic annotation might be out of sync...
 
@@ -92,14 +96,14 @@ sampleQual <- function (x) {
 qualityF <- lapply(allFastqF, sampleQual)
 qualityR <- lapply(allFastqR, sampleQual)
 
-shouldL <- max(unlist(lapply(quality, length)))
+shouldL <- max(unlist(lapply(qualityF, length)))
 
 qualityFilledF <- lapply(qualityF, function (x) {
     c(x, rep(NA, times=shouldL - length(x)))
 })
 
 qualityFilledR <- lapply(qualityR, function (x) {
-    c(x, rep(NA, times=shouldL - length(x)))
+    c(x, rep(NA, times=(shouldL - length(x))))
 })
 
 
@@ -176,7 +180,10 @@ sum(filter[,"reads.out"])/sum(filter[,"reads.in"])
 
 ### Over 80% passed for all runs...
 filter$run <- unlist(lapply(strsplit(samplesAll, "_-"), "[", 1))
+
+## but less in some runs...
 by(filter, filter$run, function (x) sum(x[,"reads.out"]/sum(x[,"reads.in"])))
+
 
 files <- PairedReadFileSet(filtFs, filtRs)
 
@@ -193,41 +200,74 @@ primer <- PrimerPairsSet(primerF, primerR)
 
 
 ##Multi amplicon pipeline
-if(doMultiAmp){
+if(doMultiAmpSort){
   MA <- MultiAmplicon(primer, files)
   filedir <- "/SAN/Victors_playground/Metabarcoding/AA_Hyena/stratified_All"
   if(dir.exists(filedir)) unlink(filedir, recursive=TRUE)
   ## This step sort the reads into amplicons based on the number of primer pairs
   MA <- sortAmplicons(MA, n=1e+05, filedir=filedir) 
-
-  library(pheatap)
-  
-  errF <-  learnErrors(unlist(getStratifiedFilesF(MA)), nbase=1e8,
-                       verbose=0, multithread = 12)
-  errR <- learnErrors(unlist(getStratifiedFilesR(MA)), nbase=1e8,
-                      verbose=0, multithread = 12)
-  
-  MA <- derepMulti(MA, mc.cores=12) 
-  
-  MA <- dadaMulti(MA, Ferr=errF, Rerr=errR,  pool=FALSE,
-                  verbose=0, mc.cores=12)
-  
-  MA <- mergeMulti(MA, mc.cores=12) 
-  
-  propMerged <- MultiAmplicon::calcPropMerged(MA)
-  
-  MA <- mergeMulti(MA, justConcatenate=propMerged<0.8, mc.cores=12) 
-  
-  MA <- makeSequenceTableMulti(MA, mc.cores=12) 
-  
-  MA <- removeChimeraMulti(MA, mc.cores=12)
-  
-  saveRDS(MA, "/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_1.RDS") ##Pool Hyena 1 preliminary run
-  #saveRDS(MA, "/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_2.RDS") ##Pool Hyena 2 full run (2nd batch of data)
-} else{
-  MA <- readRDS("/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_1.RDS") ###START from here now!
-  #MA <- readRDS("/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_2.RDS")
+  saveRDS(MA, file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_sorted.Rds")
+} else {
+    MA <- readRDS(file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_sorted.Rds")
 }
+
+  ## seperate sample data for each run
+  rownames(filter) <- rownames(MA@sampleData)
+  MA <- addSampleData(MA, filter)
+
+  library(pheatmap)
+  pdf("Figures/overview_all_heat.pdf", width=16, height=61)
+  pheatmap(log10(getRawCounts(MA)+1)) #, 
+  ##          annotation_col=MA@sampleData[, c("run", "reads.in")])
+  dev.off()
+
+if(doMultiAmpError){
+  ## doing things seperately per run from here to allow sperate error
+  ## profiles per run
+  errorList <- lapply(unique(MA@sampleData$run), function (run) { 
+      i <- which(MA@sampleData$run %in% run)
+      errF <-  learnErrors(unlist(getStratifiedFilesF(MA[, i])), nbase=1e8,
+                           verbose=0, multithread = 12)
+      errR <- learnErrors(unlist(getStratifiedFilesR(MA[, i])), nbase=1e8,
+                          verbose=0, multithread = 12)
+      list(errF, errR)
+  })
+
+  
+  MAList <- lapply(unique(MA@sampleData$run), function (run) { 
+      i <- which(MA@sampleData$run %in% run)
+      derepMulti(MA[, i], mc.cores=12)
+  })
+      
+  MAList <- lapply(seq_along(errorList), function (i) { 
+     dadaMulti(MAList[[i]], Ferr=errorList[[i]][[1]],
+                      Rerr=errorList[[i]][[2]],  pool=FALSE,
+                      verbose=0, mc.cores = 12)
+  })
+
+  ## combining into one MA object again
+  MA <- Reduce(concatenateMultiAmplicon, MAList)
+  saveRDS(MA, file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_error.Rds")
+} else {
+    MA <- readRDS(file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_error.Rds")
+}
+
+
+if(doMultiAmpPipe){
+    MA <- mergeMulti(MA, mc.cores=12) 
+  
+    propMerged <- MultiAmplicon::calcPropMerged(MA)
+  
+    MA <- mergeMulti(MA, justConcatenate=propMerged<0.8, mc.cores=12) 
+
+    MA <- makeSequenceTableMulti(MA, mc.cores=12) 
+  
+    MA <- removeChimeraMulti(MA, mc.cores=12)
+    saveRDS(MA, file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_piped.Rds")
+} else {
+    MA <- readRDS(file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_piped.Rds")
+}
+
 
 trackingF <- getPipelineSummary(MA) 
 plotPipelineSummary(trackingF) 
