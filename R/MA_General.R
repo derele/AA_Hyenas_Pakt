@@ -15,6 +15,8 @@ library(parallel)
 
 ## re-run or use pre-computed results for different parts of the pipeline:
 ## Set to FALSE to use pre-computed and saved results, TRUE to redo analyses.
+doQualEval <- FALSE
+
 doFilter <- FALSE
 
 doMultiAmpSort <- FALSE
@@ -61,71 +63,73 @@ fullpath <- paste0("/SAN/Victors_playground/Metabarcoding/AA_Hyena/", path)
 names(fullpath) <- path
 
 fastqList <- lapply(fullpath, function (path) { 
-    fastqFiles <- list.files(path, pattern=".fastq.gz$", full.names=TRUE) #take all fastaq files from the folder 
-    fastqF <- grep("_R1_001.fastq.gz", fastqFiles, value = TRUE) #separate the forward reads
-    fastqR <- grep("_R2_001.fastq.gz", fastqFiles, value = TRUE) #separate the reverse reads
+    fastqFiles <- list.files(path, pattern=".fastq.gz$", full.names=TRUE) 
+    fastqF <- grep("_R1_001.fastq.gz", fastqFiles, value = TRUE)
+    fastqR <- grep("_R2_001.fastq.gz", fastqFiles, value = TRUE)
     list(fastqF=fastqF, fastqR=fastqR)
 })
 
-readlenght <- lapply(fastqList, function (x) {
-    con <- file(x[["fastqF"]][1],"r")
-    ## first line
-    secondLine <- readLines(con, n=2)[[2]]
-    ### simple check whether it's V2 or V3 data
-    nchar(secondLine)
-})
-
-allFastqF <- lapply(fastqList, function (x) {
-    readFastq(x[["fastqF"]])
-})
-
-allFastqR <- lapply(fastqList, function (x) {
-    readFastq(x[["fastqR"]])
-})
-
-
-sampleQual <- function (x) {
-    ## sample quality scores of 100,000 sequences 
-    qmat <- as(quality(x)[sample(100000)], "matrix")
-    cols <- seq(1, ncol(qmat), by=10)
-    sapply(cols, function (i) {
-        mean(qmat[, i], na.rm=TRUE)
+if(doQualEval){
+    readlenght <- lapply(fastqList, function (x) {
+        con <- file(x[["fastqF"]][1],"r")
+        ## first line
+        secondLine <- readLines(con, n=2)[[2]]
+### simple check whether it's V2 or V3 data
+        nchar(secondLine)
     })
+
+    allFastqF <- lapply(fastqList, function (x) {
+        readFastq(x[["fastqF"]])
+    })
+
+    allFastqR <- lapply(fastqList, function (x) {
+        readFastq(x[["fastqR"]])
+    })
+
+
+    sampleQual <- function (x) {
+        ## sample quality scores of 100,000 sequences 
+        qmat <- as(quality(x)[sample(100000)], "matrix")
+        cols <- seq(1, ncol(qmat), by=10)
+        sapply(cols, function (i) {
+            mean(qmat[, i], na.rm=TRUE)
+        })
+    }
+
+    qualityF <- lapply(allFastqF, sampleQual)
+    qualityR <- lapply(allFastqR, sampleQual)
+
+    shouldL <- max(unlist(lapply(qualityF, length)))
+
+    qualityFilledF <- lapply(qualityF, function (x) {
+        c(x, rep(NA, times=shouldL - length(x)))
+    })
+
+    qualityFilledR <- lapply(qualityR, function (x) {
+        c(x, rep(NA, times=(shouldL - length(x))))
+    })
+
+
+    qualityDFF <- Reduce("cbind",  qualityFilledF)
+    qualityDFR <- Reduce("cbind",  qualityFilledR)
+
+    colnames(qualityDFF) <- path
+    colnames(qualityDFR) <- path
+
+    qualityDFFL <- reshape2::melt(qualityDFF)
+    qualityDFFL$direction <- "forward"
+
+    qualityDFRL <- reshape2::melt(qualityDFR)
+    qualityDFRL$direction <- "reverse"
+
+    qualityDFL <- rbind(qualityDFFL, qualityDFRL)
+
+    qualityDFL$position <- qualityDFL$Var1*10 -10
+
+    ggplot(qualityDFL, aes(position, value, color=Var2)) +
+        geom_line() +
+        facet_wrap(~direction)
 }
-
-qualityF <- lapply(allFastqF, sampleQual)
-qualityR <- lapply(allFastqR, sampleQual)
-
-shouldL <- max(unlist(lapply(qualityF, length)))
-
-qualityFilledF <- lapply(qualityF, function (x) {
-    c(x, rep(NA, times=shouldL - length(x)))
-})
-
-qualityFilledR <- lapply(qualityR, function (x) {
-    c(x, rep(NA, times=(shouldL - length(x))))
-})
-
-
-qualityDFF <- Reduce("cbind",  qualityFilledF)
-qualityDFR <- Reduce("cbind",  qualityFilledR)
-
-colnames(qualityDFF) <- path
-colnames(qualityDFR) <- path
-
-qualityDFFL <- reshape2::melt(qualityDFF)
-qualityDFFL$direction <- "forward"
-
-qualityDFRL <- reshape2::melt(qualityDFR)
-qualityDFRL$direction <- "reverse"
-
-qualityDFL <- rbind(qualityDFFL, qualityDFRL)
-
-qualityDFL$position <- qualityDFL$Var1*10 -10
-
-ggplot(qualityDFL, aes(position, value, color=Var2)) +
-    geom_line() +
-    facet_wrap(~direction)
 
 ## concluding from this that we can truncate at 220 and 200 for
 ## reverse and forward respectively
