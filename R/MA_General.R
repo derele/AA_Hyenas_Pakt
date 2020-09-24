@@ -12,6 +12,9 @@ library(data.table)
 library(taxonomizr)
 library(taxize)
 library(parallel)
+library(pheatmap)
+library(tidyr)
+
 
 ## re-run or use pre-computed results for different parts of the pipeline:
 ## Set to FALSE to use pre-computed and saved results, TRUE to redo analyses.
@@ -173,23 +176,40 @@ if(doFilter){
   filter.track <- readRDS(file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/filter.Rds")
 }
 
-## Error in filterAndTrim(fastqFall[i], filtFs[i], fastqRall[i], filtRs[i],  : 
-##   All output files must be distinct.
-## In addition: There were 50 or more warnings (use warnings() to see the first 50)
-
-
 ##Check the proportion of reads that passed the filtering 
 filter <- as.data.frame(do.call(rbind, filter.track))
 sum(filter[,"reads.out"])/sum(filter[,"reads.in"])
 
 ### Over 80% passed for all runs...
 filter$run <- unlist(lapply(strsplit(samplesAll, "_-"), "[", 1))
+##filter$run <- gsub("\\d_part\\d", "", filter$run)
 
 ## but less in some runs...
 by(filter, filter$run, function (x) sum(x[,"reads.out"]/sum(x[,"reads.in"])))
 
 
 files <- PairedReadFileSet(filtFs, filtRs)
+
+### SAMPLES
+sampleIDs <- read.csv("Data/Index_Pool_1.csv")
+sampleIDs <- merge(sampleIDs, read.csv("Data/Index_Pool_2.csv"), by="Sample", all=TRUE)
+
+sampleIDs <- pivot_longer(sampleIDs, cols=c(BeGenDiv_Pool_1, BeGenDiv_Pool_2)) 
+
+sampleIDs <- as.data.frame(sampleIDs)
+
+colnames(sampleIDs)[colnames(sampleIDs)%in%"value"] <- "sampleID"
+
+filter$sampleID <- gsub(".*?(P\\d)\\.(FLD\\d{4}).*",
+                        "\\1_\\2", rownames(filter))
+
+filter$SnumIDs <- gsub("(S\\d{3,4})\\.(P\\d)\\.(FLD\\d{4}).*", "\\1_\\2_\\3",
+                       rownames(filter))
+
+sampleIDs <- merge(sampleIDs, filter, by="sampleID", all=TRUE)
+
+sampleIDs$ampMethod <- ifelse(grepl("P1", sampleIDs$sampleID),
+       "MultiAmp", ifelse(grepl("P2", sampleIDs$sampleID), "SingleAmp", NA))
 
 #Preparation of primer file ### Here stats the Multiamplicon pipeline from Emanuel
 
@@ -202,28 +222,60 @@ names(primerF) <- as.character(ptable[, "Name_F"])
 names(primerR) <- as.character(ptable[, "Name_R"])
 primer <- PrimerPairsSet(primerF, primerR)
 
+M1 <- MultiAmplicon(primer, files)
+
+rownames(sampleIDs) <- make.unique(paste(sampleIDs$run,
+                                         gsub("_", "-", sampleIDs$SnumIDs),
+                                         sep="_-"))
+
+MA <- addSampleData(MA, sampleIDs)
+
+sumSample <- tibble(sampleIDs) %>%
+    group_by(Sample, ampMethod) %>% drop_na() %>%
+    summarise(FilteredReads = sum(reads.out), DNA_conc=unique(DNA_conc),
+              P260_280 = unique(P260_280), P260_230 = unique(P260_230)) %>%
+    transform(fewReads = sumSample$FilteredReads < quantile(sumSample$FilteredReads, 0.1))
+
+fewData <- subset(sumSample, fewReads)
+goodData <- subset(sumSample, !fewReads)
+
+write.csv(sumSample, file="sequencingOutputBySample.csv")
+
+## devtools::install_github("slowkow/ggrepel")
+library(ggrepel)
+
+
+pos <- position_jitter(width = 0.3, seed = 1)
+pdf("Figures/sequencingOutputBySample.pdf", width=7, height=7)
+ggplot(goodData, aes(ampMethod, FilteredReads, label=Sample)) +
+    geom_point(position=pos, aes(color=fewReads)) +
+    geom_label_repel(data = fewData,
+                     position = pos) +
+    scale_y_log10() +
+    labs(color = "#Reads < \n0.1 quantile\n(6072)") +
+    theme_bw()
+dev.off()
+
 
 ##Multi amplicon pipeline
 if(doMultiAmpSort){
-  MA <- MultiAmplicon(primer, files)
   filedir <- "/SAN/Victors_playground/Metabarcoding/AA_Hyena/stratified_All"
   if(dir.exists(filedir)) unlink(filedir, recursive=TRUE)
   ## This step sort the reads into amplicons based on the number of primer pairs
   MA <- sortAmplicons(MA, n=1e+05, filedir=filedir) 
-  saveRDS(MA, file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_sorted.Rds")
-} else {
-    MA <- readRDS(file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_sorted.Rds")
-}
 
-  ## seperate sample data for each run
-  rownames(filter) <- rownames(MA@sampleData)
-  MA <- addSampleData(MA, filter)
-
-  library(pheatmap)
   pdf("Figures/overview_all_heat.pdf", width=16, height=61)
   pheatmap(log10(getRawCounts(MA)+1)) #, 
   ##          annotation_col=MA@sampleData[, c("run", "reads.in")])
   dev.off()
+
+  saveRDS(MA, file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_sorted.Rds")
+
+} else {
+    MA <- readRDS(file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_sorted.Rds")
+}
+
+## seperate sample data for each run
 
 if(doMultiAmpError){
   ## doing things seperately per run from here to allow sperate error
