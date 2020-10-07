@@ -14,6 +14,7 @@ library(taxize)
 library(parallel)
 library(pheatmap)
 library(tidyr)
+library(dplyr)
 
 
 ## re-run or use pre-computed results for different parts of the pipeline:
@@ -169,7 +170,8 @@ if(doFilter){
       filterAndTrim(fastqFall[i], filtFs[i], fastqRall[i], filtRs[i],
                     truncLen=c(220,200), minLen=c(220,200), 
                     maxN=0, maxEE=2, truncQ=2, 
-                    compress=TRUE, verbose=TRUE)
+                    compress=TRUE, verbose=TRUE,
+                    matchIDs=TRUE) ## forward and reverse not matching otherwise 
   })
   saveRDS(filter.track, file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/filter.Rds")
 } else {
@@ -292,31 +294,40 @@ if(doMultiAmpError){
   
   MAList <- lapply(unique(MA@sampleData$run), function (run) { 
       i <- which(MA@sampleData$run %in% run)
-      derepMulti(MA[, i], mc.cores=12)
+      derepMulti(MA[, i], mc.cores=1)
   })
       
   MAList <- lapply(seq_along(errorList), function (i) { 
      dadaMulti(MAList[[i]], Ferr=errorList[[i]][[1]],
                       Rerr=errorList[[i]][[2]],  pool=FALSE,
-                      verbose=0, mc.cores = 12)
+                      verbose=0, mc.cores = 1)
   })
 
   ## combining into one MA object again
-  MA <- Reduce(concatenateMultiAmplicon, MAList)
-  saveRDS(MA, file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_error.Rds")
+  saveRDS(MAList, file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MAList_error.Rds")
 } else {
-    MA <- readRDS(file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_error.Rds")
+    MAList <- readRDS(file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MAList_error.Rds")
 }
 
 
 if(doMultiAmpPipe){
-    MA <- mergeMulti(MA, mc.cores=12) 
-  
-    propMerged <- MultiAmplicon::calcPropMerged(MA)
-  
-    MA <- mergeMulti(MA, justConcatenate=propMerged<0.8, mc.cores=12) 
+    MAListMerged <- lapply(MAList, mergeMulti)
+    ###  so there is a strange error if I concatenate the list before
+    ###  the merging: the dada and derep objects get out of sync. It
+    ###  migh be worth to revisit this.
+    MAMerged <- Reduce("concatenateMultiAmplicon", MAListMerged)
+    
+    propMerged <- MultiAmplicon::calcPropMerged(MAMerged)
 
-    MA <- makeSequenceTableMulti(MA, mc.cores=12) 
+    MAListMerged <- lapply(MAList, mergeMulti, justConcatenate=propMerged<0.7)
+
+    MA <- Reduce("concatenateMultiAmplicon", MAListMerged)
+    table(calcPropMerged(MA)>0.7)
+
+    ## consider removing the clutter (lot of space in RAM)
+    # rm(MAMerged, MAListMerged, MAList)
+
+    MA <- makeSequenceTableMulti(MA, mc.cores=1) 
   
     MA <- removeChimeraMulti(MA, mc.cores=12)
     saveRDS(MA, file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_piped.Rds")
@@ -326,29 +337,59 @@ if(doMultiAmpPipe){
 
 
 trackingF <- getPipelineSummary(MA) 
-plotPipelineSummary(trackingF) 
 PipSum <- plotPipelineSummary(trackingF) + scale_y_log10()
-#ggsave("Sequencing_summary_Hyena_1.pdf", PipSum, path = "~/AA_HMHZ/", height = 15, width = 15)
+ggsave("Figures/Pipeline_track.pdf", PipSum,height = 15, width = 15)
 
 
-Heatmap <- plotAmpliconNumbers(MA)
-#ggsave("Sequencing_reads_Hyena_2.pdf", Heatmap, path = "~/AA_Hyena/", height = 15, width = 15)
+AmpNum <- plotAmpliconNumbers(MA)
+ggsave("Figures/Amp_num.pdf", AmpNum, height = 15, width = 45)
 
-#pdf("~/AA_Hyena/Sequencing_reads.pdf", plotAmpliconNumbers(MA), height = 15, width = 15)
-#dev.off()
 
 ###New taxonomic assignment
+## should be set sysetem-wide, here just for clarity
+Sys.setenv("BLASTDB" = "/SAN/db/blastdb/") 
 
-Sys.setenv("BLASTDB" = "/SAN/db/blastdb/") #To make the annotation work, boss will fix this in the package
-#library("vctrs", lib.loc="/usr/local/lib/R/site-library")
-#MA <- blastTaxAnnot(MA,  dataBaseDir = Sys.getenv("BLASTDB"), negative_gilist = "/SAN/db/blastdb/uncultured.gi", num_threads = 20)
+                                        
+
+## finding the same ASVs in different runs to plot against each other
+## (for the same samples)
+
+## amp3 (18S) and amp8 (16S) are good candidates to look at this
+
+foo <- getSequenceTable(MA)[[8]]
+
+bar <- MA@sampleData
+
+foobar <- merge(foo, bar, by=0)
+
+## the others are the 
+non.seq.cols <- colnames(foobar)[nchar(colnames(foobar)) < 50]
+seq.cols <- colnames(foobar)[nchar(colnames(foobar)) >= 50]
+
+table(foobar$ampMethod)
+foobarBAZ <- pivot_longer(foobar, cols=all_of(seq.cols), names_repair="unique")
+colnames(foobarBAZ)[c(17, 25)] <- c("pool", "ASV")
+
+
+foobarBAZ %>% select(ampMethod, ASV, value, Sample) %>%
+    ## some are in two runs --- so this doesn't fully address things
+    ## happening in sequencing (differently between runs)
+    pivot_wider(names_from=c(ampMethod), values_from=value, values_fn = sum) ->
+    BAT 
+
+BAT
+
+corRaw <- ggplot(BAT, aes(x=MultiAmp, y=SingleAmp)) + geom_density2d_filled() + scale_y_log10() + scale_x_log10()
+
+## wow this is sooo BAD. Can't believe it
+ggsave("Figures/CorRAW.pdf", corRaw, height = 15, width = 15)
 
 
 MA <- blastTaxAnnot(MA,
-                    db = "/SAN/db/blastdb/nt",
+                    db = "/SAN/db/blastdb/nt/nt",
                     negative_gilist = "/SAN/db/blastdb/uncultured.gi",
-                    infasta = "/SAN/Metabarcoding/AA_Hyenas_EpiRank/Hyena_1_in.fasta",
-                    outblast = "/SAN/Metabarcoding/AA_Hyenas_EpiRank/blast2_1_out.fasta",
+                    infasta = "/SAN/Victors_playground/Metabarcoding/AA_Hyena/Hyena_in.fasta",
+                    outblast = "/SAN/Victors_playground/Metabarcoding/AA_Hyena/Hyena_out.blt",
                     taxonSQL = "/SAN/db/taxonomy/taxonomizr.sql", 
                     num_threads = 20)
 
