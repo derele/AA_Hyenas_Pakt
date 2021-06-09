@@ -1,0 +1,6 @@
+"","Df","SumOfSqs","R2","F","Pr(>F)"
+"mucin",1,0.34,0.01,1.38,0.09
+"age_sampling",1,0.48,0.02,1.93,0.01
+"Ancylostoma_egg_load",1,0.68,0.02,2.75,0
+"Residual",117,28.77,0.93,NA,NA
+"Total",120,30.88,1,NA,NA
