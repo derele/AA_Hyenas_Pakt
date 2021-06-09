@@ -265,19 +265,20 @@ EukDataNA <- EukData[rownames(EDatNAEuk),]
 
 
 
-EukAdonis <- adonis2(EukDataNA ~ mucin + age_sampling + Ancylostoma_egg_load,
+EukAdonis <- adonis2(EukDataNA ~ mucin + age_sampling + Ancylostoma_egg_load +
+                   CSocialRank, 
                      data=EDatNAEuk, na.action = na.omit, by="margin")
 
 
 write.csv(round(EukAdonis, 4), "EukAdonis.csv")
 
 
-BakAdonis <- adonis2(BacDataNA ~ age_sampling + season + sex +
+BacAdonis <- adonis2(BacDataNA ~ age_sampling + season + sex +
                          mucin + cortisol + CSocialRank +
                          Ancylostoma_egg_load,
         data=EDatNABac, na.action = na.omit, by="margin")
 
-write.csv(round(EukAdonis, 4), "BacAdonis.csv")
+write.csv(round(BacAdonis, 4), "BacAdonis.csv")
 
 
 ## EDatNA_juvenile <- EDatNA[EDatNA$age_sampling<730, ]
