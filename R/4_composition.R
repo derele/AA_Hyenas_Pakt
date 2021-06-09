@@ -1,6 +1,6 @@
-### FOR COMPOSITION WE USE NO NORMAIZATION, but we log10 transform
-### counts!!!
+### FOR COMPOSITION WE USE proportional transformation
 
+library(microbiome)
 
 ############ Preparing datasets for ordination
 prune_prune <- function (ps, samples=0, taxa=10) {
@@ -8,26 +8,27 @@ prune_prune <- function (ps, samples=0, taxa=10) {
     S <- prune_samples(!grepl("Negative", sample_names(s)), s)
     prune_taxa(taxa_sums(S) > taxa, S)
 }
-
-## ## genus glomed data wont converge for bacteria...
-## logBAC <- transform_sample_counts(
-##     prune_prune(PBac),
-##     function(x) log10(1+x))
+pseq.compositional <- microbiome::transform(pseq, "compositional")
 
 ## trying the species glomed dataset
-logBac <- transform_sample_counts(
-    prune_prune(PBac, -1, 50),
-    function(x) log10(1+x))
+cBac <- microbiome::transform(
+                        prune_prune(PBac, 20, 10),
+                        "compositional")
 
-logEuk <- transform_sample_counts(
-    prune_prune(PEuk, 0, 50),
-    function(x) log10(1+x))
+cEuk <- microbiome::transform(
+                        prune_prune(PEuk, 20, 10),
+                        "compositional")
+
+    
 
 library(vegan)
 
 ######### Prepare environmental data
-EDatraw <- sample_data(logBac)
-class(EDatraw) <- "data.frame"
+EDatrawBac <- sample_data(cBac)
+class(EDatrawBac) <- "data.frame"
+
+EDatrawEuk <- sample_data(cEuk)
+class(EDatrawEuk) <- "data.frame"
 
 immuno <- c("cortisol", "neopterin", "lysozyme", "IgG", "IgA", "mucin")
 
@@ -39,44 +40,45 @@ para <- c("Ancylostoma_egg_load", "Cystoisospora_oocyst_load",
 lhist <- c("season", "sampling_month",
            "prey_level_imputed", # "prey_level",
            "CSocialRank",
-           "age_sampling", "sex", "clan")
+           "age_sampling", "sex", "clan",
+           "hyena_ID")
 
-EDat <- EDatraw[, c(immuno, para, lhist)]
+EDatBac <- EDatrawBac[, c(immuno, para, lhist)]
+EDatEuk <- EDatrawEuk[, c(immuno, para, lhist)]
 
 
 ### Bacterial nMDS ##############################################
-BacData <- otu_table(logBAC)
-colnames(BacData) <- as.vector(tax_table(logBAC)[, "species"])
+BacData <- otu_table(cBac)
+colnames(BacData) <- as.vector(tax_table(cBac)[, "species"])
 
-BacDist <- distance(BacData, method="bray")
+mdsBac <- vegan::metaMDS(BacData, try=350, trymax=350, k=3)
 
-mdsBac <- vegan::metaMDS(BacDist, try=150, trymax=150, k=3)
-
-BacEFit <- envfit(mdsBac, EDat, na.rm=TRUE)
+BacEFit <- envfit(mdsBac, EDatBac, na.rm=TRUE)
 BacEFit
 
 ### Eukaryote nMDS ###########################################
 
-EukData <- otu_table(logEuk)
-colnames(EukData) <- as.vector(tax_table(logEuk)[, "genus"])
+EukData <- otu_table(cEuk)
+colnames(EukData) <- as.vector(tax_table(cEuk)[, "genus"])
 
-EukDist <- distance(EukData, method="bray")
+mdsEuk <- vegan::metaMDS(EukData, try=350, trymax=350, k=3,
+                         noshare=0.3)
 
-mdsEuk <- vegan::metaMDS(EukDist, try=150, trymax=150, k=3)
-
-EukEFit <- envfit(mdsEuk, EDat, na.rm=TRUE)
+EukEFit <- envfit(mdsEuk, EDatEuk, na.rm=TRUE)
 EukEFit
 
 
 ### exporting the data for plotting with ggplot
 
 data.scoresEuk <-  as.data.frame(scores(mdsEuk))
-data.scoresEuk <- cbind(data.scoresEuk, EDat)
+data.scoresEuk <- cbind(data.scoresEuk, EDatEuk)
 
 EnCoordEuk <-
     as.data.frame(
-        rbind(scores(EukEFit, "vectors") * ordiArrowMul(EukEFit),
-              scores(EukEFit, "factors") * ordiArrowMul(EukEFit))
+        rbind(scores(EukEFit, "vectors") *
+              ordiArrowMul(EukEFit),
+              scores(EukEFit, "factors") *
+              ordiArrowMul(EukEFit))
     )
 
 EnCoordEuk$Cat <- ifelse(rownames(EnCoordEuk)%in%immuno, "Immune",
@@ -84,7 +86,7 @@ EnCoordEuk$Cat <- ifelse(rownames(EnCoordEuk)%in%immuno, "Immune",
 
 
 data.scoresBac <-  as.data.frame(scores(mdsBac))
-data.scoresBac <- cbind(data.scoresBac, EDat)
+data.scoresBac <- cbind(data.scoresBac, EDatBac)
 
 EnCoordBac <-
     as.data.frame(
@@ -112,12 +114,6 @@ pdf("Figures/Age_Bac_ordi_EFit.pdf")
 plot(ggBac)
 dev.off()
 
-pdf("Figures/Age_Bac_ordi_EFit_cut.pdf")
-plot(ggBac) + xlim( -0.0826, 0.01)
-dev.off()
-
-
-
 ggBacIm <- ggBac +
     geom_segment(aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
                  data = subset(EnCoordBac, Cat%in%"Immune"), size =1, alpha = 0.5) +
@@ -129,12 +125,6 @@ ggBacIm <- ggBac +
 pdf("Figures/Age_Bac_ordi_EFit_Immune.pdf")
 ggBacIm
 dev.off()
-
-pdf("Figures/Age_Bac_ordi_EFit_Immune_cut.pdf")
-ggBacIm +
-        xlim( -0.0826, 0.01)
-dev.off()
-
 
 ggBacPara <- ggBac +
     geom_segment(aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
@@ -148,12 +138,6 @@ pdf("Figures/Age_Bac_ordi_EFit_Parasite.pdf")
 ggBacPara
 dev.off()
 
-pdf("Figures/Age_Bac_ordi_EFit_Parasite_cut.pdf")
-ggBacPara +
-    xlim( -0.0826, 0.01)
-dev.off()
-
-
 ggBacOther <- ggBac +
     geom_segment(aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
                  data = subset(EnCoordBac, Cat%in%"other"), size =1, alpha = 0.5) +
@@ -166,13 +150,29 @@ pdf("Figures/Age_Bac_ordi_EFit_other.pdf")
 ggBacOther
 dev.off()
 
-pdf("Figures/Age_Bac_ordi_EFit_other_cut.pdf")
-ggBacOther +
-    xlim( -0.0826, 0.01)
+
+BacSig <- names(BacEFit$vectors$pvals)[BacEFit$vectors$pvals<.05]
+
+
+ggBacSig <- ggBac +
+    geom_segment(aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
+                 data = EnCoordBac[BacSig,],
+                 size =1, alpha = 0.5) +
+    geom_point(data = EnCoordBac[BacSig,],
+               aes(x = NMDS1, y = NMDS2),
+               shape = "diamond", size = 4, alpha = 0.6) +    
+    geom_text(data = EnCoordBac[BacSig,], 
+              aes(x = NMDS1, y = NMDS2+0.04),
+              label = row.names(EnCoordBac[BacSig,]), 
+              colour = "red", fontface = "bold")
+
+pdf("Figures/Age_Bac_ordi_EFit_sig.pdf")
+ggBacSig
 dev.off()
 
 
-ggEuk <-  ggplot(data = data.scoresEuk, aes(x = NMDS1, y = NMDS2)) +
+
+ggEuk <-  ggplot(data = data.scoresEuk, aes(x = NMDS2, y = NMDS3)) +
     geom_point(data = data.scoresEuk, aes(colour = age_sampling, shape=season),
                size = 3, alpha = 0.5) +
     theme(axis.title = element_text(size = 10, face = "bold", colour = "grey30"),
@@ -224,82 +224,101 @@ dev.off()
 
 
 
+EukSig <- names(EukEFit$vectors$pvals)[EukEFit$vectors$pvals<.05]
+
+
+ggEukSig <- ggEuk +
+    geom_segment(aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
+                 data = EnCoordEuk[EukSig,],
+                 size =1, alpha = 0.5) +
+    geom_point(data = EnCoordEuk[EukSig,],
+               aes(x = NMDS1, y = NMDS2),
+               shape = "diamond", size = 4, alpha = 0.6) +    
+    geom_text(data = EnCoordEuk[EukSig,], 
+              aes(x = NMDS1, y = NMDS2+0.04),
+              label = row.names(EnCoordEuk[EukSig,]), 
+              colour = "red", fontface = "bold")
+
+pdf("Figures/Age_Euk_ordi_EFit_sig.pdf")
+ggEukSig
+dev.off()
+
 
 
 ############## PERMANOVA ###
 
 
-EDatNA <- na.omit(EDat, cols=c("cortisol", "mucin", "age_sampling", "CSocialRank", "season"))
+EDatNABac <- na.omit(EDatBac,
+                     cols=c("cortisol", "mucin", "age_sampling",
+                            "Ancylostoma_egg_load", "CSocialRank", "IgA",
+                            "season", "sex"))
 
-EukDataNA <- EukData[rownames(EDatNA),]
-
-BacDataNA <- BacData[rownames(EDatNA),]
-
-
-adonis2(EukDataNA ~ age_sampling + season + cortisol + CSocialRank + mucin + 
-            neopterin + lysozyme + IgG + IgA + mucin + Trichuris_egg_load +
-            Taeniidae_egg_load +Ancylostoma_egg_load + Cystoisospora_oocyst_load,
-        data=EDatNA, na.action = na.omit)
+BacDataNA <- BacData[rownames(EDatNABac),]
 
 
-adonis2(EukDataNA ~ age_sampling + season + cortisol + CSocialRank + mucin + 
-            neopterin + lysozyme + IgG + IgA + mucin + Trichuris_egg_load +
-            Taeniidae_egg_load +Ancylostoma_egg_load + Cystoisospora_oocyst_load,
-        data=EDatNA, na.action = na.omit, by="margin")
+EDatNAEuk <- na.omit(EDatEuk,
+                     cols=c("mucin", "age_sampling",
+                            "Ancylostoma_egg_load", "CSocialRank", 
+                            "hyena_ID"))
 
-
-adonis2(BacDataNA ~ age_sampling + season + cortisol + CSocialRank + mucin + 
-            neopterin + lysozyme + IgG + IgA + mucin + Trichuris_egg_load +
-            Taeniidae_egg_load +Ancylostoma_egg_load + Cystoisospora_oocyst_load,
-        data=EDatNA, na.action = na.omit)
-
-
-adonis2(BacDataNA ~ age_sampling + season + cortisol + CSocialRank + mucin + 
-            neopterin + lysozyme + IgG + IgA + mucin + Trichuris_egg_load +
-            Taeniidae_egg_load +Ancylostoma_egg_load + Cystoisospora_oocyst_load,
-        data=EDatNA, na.action = na.omit, by="margin")
-
-
-EDatNA_juvenile <- EDatNA[EDatNA$age_sampling<730, ]
-EDatNA_adult <-  EDatNA[EDatNA$age_sampling>=730, ]
-
-
-EukDataNA_adult <- EukDataNA[rownames(EDatNA_adult),]
-EukDataNA_juvenile <- EukDataNA[rownames(EDatNA_juvenile),]
-
-EDatNA_juvenile <- EDatNA[EDatNA$age_sampling<730, ]
-EDatNA_adult <-  EDatNA[EDatNA$age_sampling>=730, ]
-
-
-BacDataNA_adult <- BacDataNA[rownames(EDatNA_adult),]
-BacDataNA_juvenile <- BacDataNA[rownames(EDatNA_juvenile),]
+EukDataNA <- EukData[rownames(EDatNAEuk),]
 
 
 
-adonis2(BacDataNA_juvenile ~ age_sampling + season +
-            cortisol + CSocialRank + mucin + 
-            neopterin + lysozyme + IgG + IgA + Trichuris_egg_load +
-            Taeniidae_egg_load +Ancylostoma_egg_load  + Cystoisospora_oocyst_load,
-        data=EDatNA_juvenile, na.action = na.omit, by="margin")
+EukAdonis <- adonis2(EukDataNA ~ mucin + age_sampling + Ancylostoma_egg_load,
+                     data=EDatNAEuk, na.action = na.omit, by="margin")
 
 
-adonis2(BacDataNA_adult ~ age_sampling + season +
-            cortisol + CSocialRank +  mucin + 
-            neopterin + lysozyme + IgG + IgA + Trichuris_egg_load +
-            Taeniidae_egg_load +Ancylostoma_egg_load + Cystoisospora_oocyst_load,
-        data=EDatNA_adult, na.action = na.omit, by="margin")
+write.csv(round(EukAdonis, 2), "EukAdonis.csv")
 
 
-adonis2(EukDataNA_juvenile ~ age_sampling + season +
-            season + cortisol + CSocialRank +  mucin + 
-            neopterin + lysozyme + IgG + IgA + Trichuris_egg_load +
-            Taeniidae_egg_load +Ancylostoma_egg_load + Cystoisospora_oocyst_load,
-        data=EDatNA_juvenile, na.action = na.omit, by="margin")
+BakAdonis <- adonis2(BacDataNA ~ age_sampling + season + sex +
+                         mucin + cortisol + CSocialRank +
+                         Ancylostoma_egg_load,
+        data=EDatNABac, na.action = na.omit, by="margin")
+
+write.csv(round(EukAdonis, 2), "BacAdonis.csv")
 
 
-adonis2(EukDataNA_adult ~ age_sampling + season +
-            cortisol + CSocialRank +  mucin + 
-            neopterin + lysozyme + IgG + IgA + Trichuris_egg_load +
-            Taeniidae_egg_load +Ancylostoma_egg_load + Cystoisospora_oocyst_load,
-        data=EDatNA_adult, na.action = na.omit, by="margin")
+## EDatNA_juvenile <- EDatNA[EDatNA$age_sampling<730, ]
+## EDatNA_adult <-  EDatNA[EDatNA$age_sampling>=730, ]
+
+
+## EukDataNA_adult <- EukDataNA[rownames(EDatNA_adult),]
+## EukDataNA_juvenile <- EukDataNA[rownames(EDatNA_juvenile),]
+
+## EDatNA_juvenile <- EDatNA[EDatNA$age_sampling<730, ]
+## EDatNA_adult <-  EDatNA[EDatNA$age_sampling>=730, ]
+
+
+## BacDataNA_adult <- BacDataNA[rownames(EDatNA_adult),]
+## BacDataNA_juvenile <- BacDataNA[rownames(EDatNA_juvenile),]
+
+
+## adonis2(BacDataNA_juvenile ~ age_sampling + season +
+##             cortisol + CSocialRank + mucin + 
+##             neopterin + lysozyme + IgG + IgA + Trichuris_egg_load +
+##             Taeniidae_egg_load +Ancylostoma_egg_load  + Cystoisospora_oocyst_load,
+##         data=EDatNA_juvenile, na.action = na.omit, by="margin")
+
+
+## adonis2(BacDataNA_adult ~ age_sampling + season +
+##             cortisol + CSocialRank +  mucin + 
+##             neopterin + lysozyme + IgG + IgA + Trichuris_egg_load +
+##             Taeniidae_egg_load +Ancylostoma_egg_load + Cystoisospora_oocyst_load,
+##         data=EDatNA_adult, na.action = na.omit, by="margin")
+
+
+## adonis2(EukDataNA_juvenile ~ age_sampling + season +
+##             season + cortisol + CSocialRank +  mucin + 
+##             neopterin + lysozyme + IgG + IgA + Trichuris_egg_load +
+##             Taeniidae_egg_load +Ancylostoma_egg_load + Cystoisospora_oocyst_load,
+##         data=EDatNA_juvenile, na.action = na.omit, by="margin")
+
+
+## adonis2(EukDataNA_adult ~ age_sampling + season +
+##             cortisol + CSocialRank +  mucin + 
+##             neopterin + lysozyme + IgG + IgA + Trichuris_egg_load +
+##             Taeniidae_egg_load +Ancylostoma_egg_load + Cystoisospora_oocyst_load,
+##         data=EDatNA_adult, na.action = na.omit, by="margin")
 

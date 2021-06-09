@@ -453,8 +453,7 @@ newSdat <- merge(sample_data(PM), SDat, by.x=0, by.y="sample_ID.x", all.x=TRUE)
 rownames(newSdat) <- newSdat$Row.names
 newSdat$Row.names <- NULL
 
-P <- PM
-sample_data(P) <- newSdat
+sample_data(PM) <- newSdat
 sample_data(PMS) <- newSdat
 
 setdiff(SDat$sample_ID.x, sample_data(P)$Sample)
@@ -464,28 +463,51 @@ non.immuno <- setdiff(sample_data(P)$Sample, SDat$sample_ID.x)
 grep("Negative", non.immuno, value=TRUE, invert=TRUE)
 ##   "B3456" "B6423" "X6674"
 
-PG <- tax_glom(P, "genus")
-PG <- subset_taxa(PG, superkingdom%in%c("Bacteria", "Eukaryota"))
 
-PBac <- subset_taxa(PG, superkingdom%in%c("Bacteria"))
-PEuk <- subset_taxa(PG, superkingdom%in%c("Eukaryota"))
+### ONE DATASET to start with P --- ONLY MULTIAMPLICON FOR NOW
 
-PBacA <- subset_taxa(P, superkingdom%in%c("Bacteria"))
-PBacA <- subset_taxa(P, superkingdom%in%c("Bacteria"))
+### exclude super weird taxa
+P <- subset_taxa(PMS, superkingdom%in%c("Bacteria", "Eukaryota"))
 
+## Exclude off-target Eukaryote taxa 
+P <- subset_taxa(P, !phylum%in%c("Chordata",
+                                 "Chlorophyta",
+                                 "Streptophyta"
+                                 ))
 
+PS <- tax_glom(PMS, "species")
+PG <- tax_glom(PMS, "genus")
 
-## Excluding off-target Eukaryote taxa 
-PMS <- subset_taxa(PMS, !phylum%in%c("Chordata",
-                                     "Chlorophyta",
-                                     "Streptophyta"
-                                     ))
+### SIX datasets to rule them all!!!
+PBac <- subset_taxa(P, superkingdom%in%c("Bacteria"))
+PEuk <- subset_taxa(P, superkingdom%in%c("Eukaryota"))
+
+PSBac <- subset_taxa(PS, superkingdom%in%c("Bacteria"))
+PSEuk <- subset_taxa(PS, superkingdom%in%c("Eukaryota"))
+
+PGBac <- subset_taxa(PG, superkingdom%in%c("Bacteria"))
+PGEuk <- subset_taxa(PG, superkingdom%in%c("Eukaryota"))
+
 
 
 library(phyloseq)
-EukTib <- as_tibble(psmelt(PEuk))
+EukTib <- as_tibble(psmelt(PSEuk))
 
 
+EukTib %>% filter(genus%in%"Ancylostoma") %>%
+    select(Abundance, Sample, OTU, Ancylostoma_egg_load) %>%
+    group_by(Sample) %>%
+    summarize(sumAbu=sum(Abundance),
+              Sample=unique(Sample),
+              AncyMic=unique(Ancylostoma_egg_load)
+              ) %>% na.omit() -> AncyloCorDat
+
+
+AncyloCorDat %>% select_if(is.numeric) %>% cor()
+
+cor.test(AncyloCorDat$sumAbu, AncyloCorDat$AncyMic)
+
+summary(lm(sumAbu~AncyMic, AncyloCorDat))
 
 pdf("Figures/Ancylostoma_Cor.pdf")
 EukTib %>% filter(genus%in%"Ancylostoma") %>%
@@ -503,30 +525,26 @@ EukTib %>% filter(genus%in%"Ancylostoma") %>%
 dev.off()
 
 
-EukTib %>% filter(genus%in%"Ancylostoma") %>%
-    select(Abundance, Sample, OTU, Ancylostoma_egg_load) %>%
-    group_by(Sample) %>%
-    summarize(sumAbu=sum(Abundance),
-              Sample=unique(Sample),
-              AncyMic=unique(Ancylostoma_egg_load)
-              ) %>% na.omit() -> Acor
-
-cor(Acor$AncyMic, Acor$sumAbu)
-
-pdf("Figures/CystoisosporaPlus_Cor.pdf")
-EukTib %>% filter(family%in%c("Sarcocystidae", "Eimeriidae")) %>% 
+EukTib %>% filter(order%in%c("Eucoccidiorida")) %>% 
     select(Abundance, Sample, OTU, Cystoisospora_oocyst_load) %>%
     group_by(Sample) %>%
     summarize(sumAbu=sum(Abundance),
               Sample=unique(Sample),
-              AncyMic=unique(Cystoisospora_oocyst_load)
-              ) %>% na.omit() %>%
-    ggplot(aes(AncyMic+1, sumAbu+1)) +
+              CystoMic=unique(Cystoisospora_oocyst_load)
+              ) %>% na.omit() -> CoccidiaCorDat
+
+CoccidiaCorDat %>% select_if(is.numeric) %>% cor()
+
+pdf("Figures/Coccidia_Cor.pdf")
+CoccidiaCorDat %>%
+    ggplot(aes(CystoMic+1, sumAbu+1)) +
     geom_point() +
     stat_smooth(method="lm") +
-    scale_y_log10("Cystoisospora sequence abundance") +
+    scale_y_log10("Coccidia sequence abundance") +
     scale_x_log10("Cystoisospora oocyst load")
 dev.off()
+
+cor.test(CoccidiaCorDat$CystoMic, CoccidiaCorDat$sumAbu, method="spearman")
 
 EukTib %>% filter(genus%in%"Cystoisospora") %>% 
     select(Abundance, Sample, OTU, Cystoisospora_oocyst_load) %>%
@@ -534,14 +552,15 @@ EukTib %>% filter(genus%in%"Cystoisospora") %>%
     summarize(sumAbu=sum(Abundance),
               Sample=unique(Sample),
               CytoMic=unique(Cystoisospora_oocyst_load)
-              ) %>% na.omit() -> Ccor
+              ) %>% na.omit() -> CystoisoCorDat
 
 pdf("Figures/Cystoisospora_Cor.pdf")
-    ggplot(Ccor, aes(CytoMic+1, sumAbu+1)) +
+CystoisoCorDat %>%
+    ggplot(aes(CytoMic+1, sumAbu+1)) +
     geom_point() +
     stat_smooth(method="lm") +
     scale_y_log10("Cytoisospora sequence abundance") +
     scale_x_log10("Cystoisospora oocyst load")
 dev.off()
 
-cor(Ccor$CytoMic, Ccor$sumAbu)
+cor.test(CystoisoCorDat$CytoMic, CystoisoCorDat$sumAbu, method="spearman")
