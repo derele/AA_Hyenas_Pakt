@@ -269,7 +269,7 @@ EukAdonis <- adonis2(EukDataNA ~ mucin + age_sampling + Ancylostoma_egg_load,
                      data=EDatNAEuk, na.action = na.omit, by="margin")
 
 
-write.csv(round(EukAdonis, 2), "EukAdonis.csv")
+write.csv(round(EukAdonis, 4), "EukAdonis.csv")
 
 
 BakAdonis <- adonis2(BacDataNA ~ age_sampling + season + sex +
@@ -277,7 +277,7 @@ BakAdonis <- adonis2(BacDataNA ~ age_sampling + season + sex +
                          Ancylostoma_egg_load,
         data=EDatNABac, na.action = na.omit, by="margin")
 
-write.csv(round(EukAdonis, 2), "BacAdonis.csv")
+write.csv(round(EukAdonis, 4), "BacAdonis.csv")
 
 
 ## EDatNA_juvenile <- EDatNA[EDatNA$age_sampling<730, ]
