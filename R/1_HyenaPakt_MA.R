@@ -1,17 +1,17 @@
 ## Please uncomment the first time you run this and re-install packages
 
-# require(devtools)
+require(devtools)
+## load the devel version
+devtools::load_all("../MultiAmplicon")
 ## devtools::install_github("derele/MultiAmplicon", force= T)
-
-library(MultiAmplicon)
 
 library(ggplot2)
 library(dada2)
-library(reshape)
+## library(reshape)
 library(phyloseq)
 library(data.table)
-library(taxonomizr)
-library(taxize)
+## library(taxonomizr)
+## library(taxize)
 library(parallel)
 library(pheatmap)
 library(tidyr)
@@ -26,11 +26,11 @@ doFilter <- FALSE
 
 doMultiAmpSort <- FALSE
 
-doMultiAmpError <- FALSE
+doMultiAmpError <- FALSE ## c("errEst", "direct")
 
 doMultiAmpPipe <- FALSE
     
-doTax <- TRUE
+doTax <- FALSE
 
 ###################Full run Microbiome#######################
 ## Preparation of files. These are the same steps that are followed by
@@ -185,7 +185,6 @@ filter$run <- unlist(lapply(strsplit(samplesAll, "_-"), "[", 1))
 ## but less in some runs...
 by(filter, filter$run, function (x) sum(x[,"reads.out"]/sum(x[,"reads.in"])))
 
-
 files <- PairedReadFileSet(filtFs, filtRs)
 
 ### SAMPLES
@@ -272,132 +271,122 @@ if(doMultiAmpSort){
 
 ## seperate sample data for each run
 
-if(doMultiAmpError){
+if("errEst"%in%doMultiAmpError){
   ## doing things seperately per run from here to allow sperate error
   ## profiles per run
   errorList <- lapply(unique(MA@sampleData$run), function (run) { 
       i <- which(MA@sampleData$run %in% run)
       errF <-  learnErrors(unlist(getStratifiedFilesF(MA[, i])), nbase=1e8,
-                           verbose=0, multithread = 12)
+                           verbose=0, multithread = 84)
       errR <- learnErrors(unlist(getStratifiedFilesR(MA[, i])), nbase=1e8,
-                          verbose=0, multithread = 12)
+                          verbose=0, multithread = 84)
       list(errF, errR)
   })
-
     MAList <- lapply(seq_along(unique(MA@sampleData$run)), function (j) {
         run <- unique(MA@sampleData$run)[j]
         i <- which(MA@sampleData$run %in% run)
         dadaMulti(MA[,i], Ferr=errorList[[j]][[1]],
                   Rerr=errorList[[j]][[2]],  pool=FALSE,
-                  verbose=0, mc.cores = 1)
+                  verbose=0, mc.cores = 84)
     })
-
   ## combining into one MA object again
   saveRDS(MAList, file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MAList_error.Rds")
-} else {
+## } else if ("direct"%in%doMultiAmpError){
+##     MA <- derepMulti(MA, mc.cores=24)
+##     MA <- dadaMulti(MA, dadaMulti(MA, Ferr=NULL, selfConsist=TRUE,
+##                                   Rerr=NULL,  pool=TRUE,
+##                                   verbose=0, mc.cores = 64))
+##     saveRDS(MA, file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MAdirectErr.Rds")
+}else {
     MAList <- readRDS(file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MAList_error.Rds")
+##    MA <- readRDS(file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MAdirectErr.Rds")
 }
 
 if(doMultiAmpPipe){
-    MAListMerged <- lapply(MAList, mergeMulti, mc.cores=12)
-    ###  so there is a strange error if I concatenate the list before
-    ###  the merging: the dada and derep objects get out of sync. It
-    ###  migh be worth to revisit this.
-    MAMerged <- Reduce("concatenateMultiAmplicon", MAListMerged)
-    
-    propMerged <- MultiAmplicon::calcPropMerged(MAMerged)
+    MAMerged <- Reduce("concatenateMultiAmplicon", MAList)
+    MAMerged <- mergeMulti(MAMerged, mc.cores=84)
 
-    MAListMerged <- lapply(MAList, mergeMulti, justConcatenate=propMerged<0.7)
+    propMerged <- calcPropMerged(MAMerged)
 
-    MA <- Reduce("concatenateMultiAmplicon", MAListMerged)
+    MA.P <- mergeMulti(MAMerged, justConcatenate=propMerged<0.7, mc.cores=84)
     
     ## consider removing the clutter (lot of space in RAM)
     ## rm(MAMerged, MAListMerged, MAList)
 
-        
-    MA <- makeSequenceTableMulti(MA, mc.cores=12)
-    MA <- removeChimeraMulti(MA, mc.cores=12) 
+    MA.P <- makeSequenceTableMulti(MA.P, mc.cores=84)
+
+    ## get the sequence table fill it, bind it, coerce it to integer
+    STF <- getSequenceTable(MA.P, dropEmpty=FALSE)
+    STFU <- do.call(cbind, STF)
+    mode(STFU) <- "integer"
+
+    ## collapse same identical ASVs transpose data: calculate rowsum
+    ## per group (colnames of the original data), then transpose the
+    ## result back to original structure.
+    STFU <- t(rowsum(t(STFU), group = colnames(STFU), na.rm = TRUE))
+
+    isCruelBimera <- dada2::isBimeraDenovoTable(STFU,
+                                                multithread=TRUE, minSampleFraction=0.5,
+                                                allowOneOff=TRUE, maxShift = 32,
+                                                ignoreNNegatives=4)
+
+    isPooledBimera <- dada2::isBimeraDenovo(STFU, multithread=86, 
+                                            allowOneOff=TRUE, maxShift = 32)
+
+    superCruel <- isCruelBimera  | isPooledBimera
+    NoBimeras <- colnames(STFU[, !superCruel])
+
+    MA.final <- MA.P
+    
+    MA.final@sequenceTableNoChime <- sapply(getSequenceTable(MA.final), function (x) {
+        noBim <- intersect(NoBimeras, colnames(x))
+        x[, noBim, drop=FALSE] ## DROP FALSE TO KEEP MATRIX, ARRAY structure!!
+    })
   
-    saveRDS(MA, file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_piped.Rds")
+    saveRDS(MA.final, file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_piped.Rds")
 } else {
-    MA <- readRDS(file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_piped.Rds")
+    MA.final <- readRDS(file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_piped.Rds")
 }
 
-trackingF <- getPipelineSummary(MA) 
-PipSum <- plotPipelineSummary(trackingF) + scale_y_log10()
-ggsave("Figures/Pipeline_track.pdf", PipSum,height = 15, width = 15)
+## ## FIXME in package!
+## trackingF <- getPipelineSummaryX(MA.final) 
+## PipSum <- plotPipelineSummary(trackingF) + scale_y_log10()
+## ggsave("Figures/Pipeline_track.pdf", PipSum, height = 15, width = 15)
 
-
-## ## an analysis of (technica) replication WORK ON ME!!!
-## foo <- getSequenceTable(MA)[[8]]
-
-## bar <- MA@sampleData
-
-## foobar <- merge(foo, bar, by=0)
-
-## ## the others are the 
-## non.seq.cols <- colnames(foobar)[nchar(colnames(foobar)) < 50]
-## seq.cols <- colnames(foobar)[nchar(colnames(foobar)) >= 50]
-
-## table(foobar$ampMethod)
-## foobarBAZ <- pivot_longer(foobar, cols=all_of(seq.cols), names_repair="unique")
-## colnames(foobarBAZ)[c(17, 25)] <- c("pool", "ASV")
-
-
-## drop_na(foobarBAZ) %>% select(ampMethod, ASV, value, Sample) %>%
-##     ## some are in two runs --- so this doesn't fully address things
-##     ## happening in sequencing (differently between runs)
-##     pivot_wider(names_from=c(ampMethod), values_from=value, values_fn = sum) ->
-##     BAT 
-
-## BAT
-## ## a value for each sample for each ASV! That's what we need to look at!
-## rowwise(BAT) %>% mutate(bothSum=sum(MultiAmp, SingleAmp),
-##                         bothPos=MultiAmp>0&&SingleAmp>0) -> BAT
-
-## cor(BAT$MultiAmp, BAT$SingleAmp, use="pairwise.complete.obs")
-
-## cor(filter(BAT, bothPos)$MultiAmp, filter(BAT, bothPos)$SingleAmp,
-##     use="pairwise.complete.obs")
-
-## ## well, damn!
-
-## corRaw <- ggplot(filter(BAT, bothPos), aes(x=MultiAmp, y=SingleAmp)) +
-##     geom_density2d_filled()   +
-##     scale_y_log10() +
-##     scale_x_log10()
-
-## ## wow this is sooo BAD. Can't believe it
-## ggsave("Figures/CorRAW.pdf", corRaw, height = 15, width = 15)
-
-
-###New taxonomic assignment
-## should be set sysetem-wide, here just for clarity
-## Sys.setenv("BLASTDB" = "/SAN/db/blastdb/") 
-
-
-
-MA <- blastTaxAnnot(MA,
+if(doTax){
+    unlink("/SAN/Victors_playground/Metabarcoding/AA_Hyena/Hyena_in.fasta")
+    unlink("/SAN/Victors_playground/Metabarcoding/AA_Hyena/Hyena_out.blt")
+}
+MA.A <- blastTaxAnnot(MA.final,
                     db = "/SAN/db/blastdb/nt/nt",
                     negative_gilist = "/SAN/db/blastdb/uncultured.gi",
                     infasta = "/SAN/Victors_playground/Metabarcoding/AA_Hyena/Hyena_in.fasta",
                     outblast = "/SAN/Victors_playground/Metabarcoding/AA_Hyena/Hyena_out.blt",
                     taxonSQL = "/SAN/db/taxonomy/taxonomizr.sql", 
-                    num_threads = 20)
+                    num_threads = 64)
 
-PH <- toPhyloseq(MA, samples=colnames(MA))
 
-## this STILL! buggs
+### more sample data
+
+
+PH <- toPhyloseq(MA.A, samples=colnames(MA.A))
+
+
+## Does single Amplicon-Data differ from multiAmplicon
+pdf("./Figures/Bacterial_ampMethod_Richness.pdf")
+plot_richness(subset_taxa(PH, superkingdom%in%"Bacteria"),
+              measures=c("Observed", "Chao1", "Shannon"),
+              "ampMethod")
+dev.off()
+
+
+## this STILL! buggs FIXME in package!!
 ## PH.list <- toPhyloseq(MA, samples=colnames(MA), multi2Single=FALSE)
-
 
 ## Some first quick view at bacterial taxa...
 TT <- tax_table(PH)
 
 BacTT <- TT[TT[, "superkingdom"]%in%"Bacteria", ]
-
-BacTT[BacTT[, "genus"]%in%"Vibrio", ]
-
 
 genusTab <- table(BacTT[, "genus"])
 
@@ -406,6 +395,10 @@ write.csv(genusTab[order(genusTab, decreasing=TRUE)],
 
 
 ## First collapsing technical replcates!!
+sample_data(PH)$Sample <- gsub("\\.2", "", sample_data(PH)$Sample)
+
+##  testing the oucome if only using singleAmpData
+PSS <- subset_samples(PH, ampMethod%in%"MultiAmp")
 
 ## This should acutally work with phyloseq's merge_samples function
 ## but doesn't as this messes up sample_data.
@@ -430,139 +423,125 @@ sumTecRep <- function (PS, by.sample, fun=sum){
         })
     })
     sdatN <- as.data.frame(do.call(rbind, sdatN))
-    phyloseq(otu_table(OTN, taxa_are_rows=FALSE),
-             sample_data(sdatN),
-             tax_table(PS))
+    if(!is.null(access(PS, "tax_table", errorIfNULL=FALSE))){
+        phyloseq(otu_table(OTN, taxa_are_rows=FALSE),
+                 sample_data(sdatN),
+                 tax_table(PS))
+    } else {
+        phyloseq(otu_table(OTN, taxa_are_rows=FALSE),
+                 sample_data(sdatN))
+    }
 }
-
 
 PM <- sumTecRep(PH, by.sample="Sample")
+PMS <- sumTecRep(PSS, by.sample="Sample")
 
 ## Now adding the annotation realy
-SDat <- read.csv("Data/Covariates_int_biomes.csv")
+## SDat <- read.csv("Data/Covariates_int_biomes.csv")
 
-newSdat <- merge(sample_data(PM), SDat, by.x=0, by.y="sample_ID", all.x=TRUE)
+SDat <- read.csv("Data/Covariates_int_biomes_21-05-04.csv")
+
+SDat$sample_ID.x[SDat$sample_ID.x=="C47"]  <- "C0047"
+SDat$sample_ID.x[SDat$sample_ID.x=="C52"]  <- "C0052"
+SDat$sample_ID.x[SDat$sample_ID.x=="C129"]  <- "C0129"
+
+SDat$CSocialRank <- rowMeans(SDat[, c("social_rank_hyena_ID",
+                                      "social_rank_genetic_mum")],
+                             na.rm=TRUE)
+
+newSdat <- merge(sample_data(PM), SDat, by.x=0, by.y="sample_ID.x", all.x=TRUE)
 rownames(newSdat) <- newSdat$Row.names
 newSdat$Row.names <- NULL
-sample_data(PM) <- newSdat
 
+P <- PM
+sample_data(P) <- newSdat
+sample_data(PMS) <- newSdat
 
-PG <- tax_glom(PM, "genus")
+setdiff(SDat$sample_ID.x, sample_data(P)$Sample)
+## Sequence covers them all!
+
+non.immuno <- setdiff(sample_data(P)$Sample, SDat$sample_ID.x)
+grep("Negative", non.immuno, value=TRUE, invert=TRUE)
+##   "B3456" "B6423" "X6674"
+
+PG <- tax_glom(P, "genus")
 PG <- subset_taxa(PG, superkingdom%in%c("Bacteria", "Eukaryota"))
 
-PBak <- subset_taxa(PG, superkingdom%in%c("Bacteria"))
-
+PBac <- subset_taxa(PG, superkingdom%in%c("Bacteria"))
 PEuk <- subset_taxa(PG, superkingdom%in%c("Eukaryota"))
 
-pdf("Figures/Genera_per_phylum_Bak.pdf")
-ggplot(data.frame(tax_table(PBak)), 
-       aes(x=phylum, y=..count..)) +
-    geom_bar() +
-    coord_polar() +
-    scale_y_log10("Number of genera per phylum") +
-    theme_bw()
-dev.off()
-
-pdf("Figures/Genera_per_phylum_Euk.pdf")
-ggplot(data.frame(tax_table(PEuk)), 
-       aes(x=phylum, y=..count..)) +
-    geom_bar() +
-    coord_polar() +
-    scale_y_log10("Number of genera per phylum") +
-    theme_bw()
-dev.off()
+PBacA <- subset_taxa(P, superkingdom%in%c("Bacteria"))
+PBacA <- subset_taxa(P, superkingdom%in%c("Bacteria"))
 
 
-pdf("Figures/Reads_per_phylum_Bak.pdf")
-ggplot(data.frame(psmelt(PBak)), 
-       aes(x=phylum, y=..count.., weight=Abundance)) +
-    geom_bar() +
-    coord_polar() +
-    scale_y_log10("Seqeuncing read counts per phylum") +
-    theme_bw()
-dev.off()
 
-pdf("Figures/Reads_per_phylum_Euk.pdf")
-ggplot(data.frame(psmelt(PEuk)), 
-       aes(x=phylum, y=..count.., weight=Abundance)) +
-    geom_bar() +
-    coord_polar() +
-    scale_y_log10("Seqeuncing read counts per phylum") +
-    theme_bw()
+## Excluding off-target Eukaryote taxa 
+PMS <- subset_taxa(PMS, !phylum%in%c("Chordata",
+                                     "Chlorophyta",
+                                     "Streptophyta"
+                                     ))
+
+
+library(phyloseq)
+EukTib <- as_tibble(psmelt(PEuk))
+
+
+
+pdf("Figures/Ancylostoma_Cor.pdf")
+EukTib %>% filter(genus%in%"Ancylostoma") %>%
+    select(Abundance, Sample, OTU, Ancylostoma_egg_load) %>%
+    group_by(Sample) %>%
+    summarize(sumAbu=sum(Abundance),
+              Sample=unique(Sample),
+              AncyMic=unique(Ancylostoma_egg_load)
+              ) %>% na.omit() %>%
+    ggplot(aes(AncyMic+1, sumAbu+1)) +
+    geom_point() +
+    stat_smooth(method="lm") +
+    scale_y_log10("Ancylostoma sequence abundance") +
+    scale_x_log10("Ancylostoma egg load")
 dev.off()
 
 
-pdf("Figures/Bacterial_richness_categorical.pdf")
-plot_richness(PBak, measures=c("Observed", "Chao1", "Shannon"), "age_sampling_cat") +
-    geom_boxplot()
+EukTib %>% filter(genus%in%"Ancylostoma") %>%
+    select(Abundance, Sample, OTU, Ancylostoma_egg_load) %>%
+    group_by(Sample) %>%
+    summarize(sumAbu=sum(Abundance),
+              Sample=unique(Sample),
+              AncyMic=unique(Ancylostoma_egg_load)
+              ) %>% na.omit() -> Acor
+
+cor(Acor$AncyMic, Acor$sumAbu)
+
+pdf("Figures/CystoisosporaPlus_Cor.pdf")
+EukTib %>% filter(family%in%c("Sarcocystidae", "Eimeriidae")) %>% 
+    select(Abundance, Sample, OTU, Cystoisospora_oocyst_load) %>%
+    group_by(Sample) %>%
+    summarize(sumAbu=sum(Abundance),
+              Sample=unique(Sample),
+              AncyMic=unique(Cystoisospora_oocyst_load)
+              ) %>% na.omit() %>%
+    ggplot(aes(AncyMic+1, sumAbu+1)) +
+    geom_point() +
+    stat_smooth(method="lm") +
+    scale_y_log10("Cystoisospora sequence abundance") +
+    scale_x_log10("Cystoisospora oocyst load")
 dev.off()
 
-pdf("Figures/Bacterial_richness_continuous.pdf")
-plot_richness(PBak, measures=c("Observed", "Chao1", "Shannon"), "age_sampling")
+EukTib %>% filter(genus%in%"Cystoisospora") %>% 
+    select(Abundance, Sample, OTU, Cystoisospora_oocyst_load) %>%
+    group_by(Sample) %>%
+    summarize(sumAbu=sum(Abundance),
+              Sample=unique(Sample),
+              CytoMic=unique(Cystoisospora_oocyst_load)
+              ) %>% na.omit() -> Ccor
+
+pdf("Figures/Cystoisospora_Cor.pdf")
+    ggplot(Ccor, aes(CytoMic+1, sumAbu+1)) +
+    geom_point() +
+    stat_smooth(method="lm") +
+    scale_y_log10("Cytoisospora sequence abundance") +
+    scale_x_log10("Cystoisospora oocyst load")
 dev.off()
 
-pdf("Figures/Euk_richness_RankMom.pdf")
-plot_richness(prune_samples(!is.na(sample_data(PEuk)$social_rank_genetic_mum),
-                            PEuk), 
-                            measures=c("Observed", "Chao1", "Shannon"),
-              "social_rank_genetic_mum") + geom_smooth()
-dev.off()
-
-
-pdf("Figures/Euk_richness_RankID.pdf")
-plot_richness(prune_samples(!is.na(sample_data(PEuk)$social_rank_hyena_ID),
-                            PEuk), 
-                            measures=c("Observed", "Chao1", "Shannon"),
-              "social_rank_hyena_ID") + geom_smooth()
-dev.off()
-
-
-prune_prune <- function (ps) {
-    s <- prune_samples(sample_sums(ps) > 100, ps)
-    S <- prune_samples(!grepl("Negative", sample_names(s)), s)
-    prune_taxa(taxa_sums(S) > 1, S)
-    
-}
-
-logBAC <- transform_sample_counts(
-    prune_prune(PBak),
-    function(x) log10(1+x))
-
-out.bc.log <- ordinate(logBAC, method = "NMDS", distance = "bray",
-                       maxit=100)
-
-pdf("Figures/age_bac_ordi.pdf")
-plot_ordination(logBAC, out.bc.log, color="age_sampling", shape="age_sampling_cat") +
-    labs(col = "Binned Age") +
-    scale_shape_discrete(solid=FALSE) +
-    guides(col = guide_legend(override.aes = list(size = 3))) +
-    theme_bw() +
-    ggtitle("Ordination on log 1+x transformed abundance of bacterial genera")
-dev.off()
-
-
-logEuk <- transform_sample_counts(
-    prune_prune(PEuk),
-    function(x) log10(1+x))
-
-out.eu.log <- ordinate(logEuk, method = "NMDS", distance = "bray")
-
-pdf("Figures/age_Euk_ordi.pdf")
-plot_ordination(logEuk, out.eu.log, color="age_sampling", shape="age_sampling_cat") +
-    labs(col = "Binned Age") +
-    scale_shape_discrete(solid=FALSE) +
-    guides(col = guide_legend(override.aes = list(size = 3))) +
-    theme_bw() +
-    ggtitle("Ordination on log 1+x transformed abundance of Eukaryote genera")
-dev.off()
-
-
-
-pdf("Figures/RankMom_Euk_ordi.pdf")
-plot_ordination(logEuk, out.eu.log, color="social_rank_genetic_mum")+
-    labs(col = "Binned Age") +
-    scale_shape_discrete(solid=FALSE) +
-    guides(col = guide_legend(override.aes = list(size = 3))) +
-    theme_bw() +
-    ggtitle("Ordination on log 1+x transformed abundance of Eukaryote genera")
-dev.off()
+cor(Ccor$CytoMic, Ccor$sumAbu)

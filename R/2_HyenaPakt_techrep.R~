@@ -1,0 +1,91 @@
+if(!exists("PH", mode="S4")){
+    source("1_HyenaPakt_MA.R")
+}
+
+
+
+## ## an analysis of (technical) replication of exact amplicon sequences
+foo <- otu_table(PM)
+
+table(grepl("\\.\\d", colnames(foo)))
+
+
+
+bar <- MA@sampleData
+
+## foobar <- merge(foo, bar, by=0)
+
+## ## the others are the 
+## non.seq.cols <- colnames(foobar)[nchar(colnames(foobar)) < 50]
+## seq.cols <- colnames(foobar)[nchar(colnames(foobar)) >= 50]
+
+## table(foobar$ampMethod)
+## foobarBAZ <- pivot_longer(foobar, cols=all_of(seq.cols), names_repair="unique")
+## colnames(foobarBAZ)[c(17, 25)] <- c("pool", "ASV")
+
+
+## drop_na(foobarBAZ) %>% select(ampMethod, ASV, value, Sample) %>%
+##     ## some are in two runs --- so this doesn't fully address things
+##     ## happening in sequencing (differently between runs)
+##     pivot_wider(names_from=c(ampMethod), values_from=value, values_fn = sum) ->
+##     BAT 
+
+## BAT
+## ## a value for each sample for each ASV! That's what we need to look at!
+## rowwise(BAT) %>% mutate(bothSum=sum(MultiAmp, SingleAmp),
+##                         bothPos=MultiAmp>0&&SingleAmp>0) -> BAT
+
+## cor(BAT$MultiAmp, BAT$SingleAmp, use="pairwise.complete.obs")
+
+## cor(filter(BAT, bothPos)$MultiAmp, filter(BAT, bothPos)$SingleAmp,
+##     use="pairwise.complete.obs")
+
+## ## well, damn!
+
+## corRaw <- ggplot(filter(BAT, bothPos), aes(x=MultiAmp, y=SingleAmp)) +
+##     geom_density2d_filled()   +
+##     scale_y_log10() +
+##     scale_x_log10()
+
+## ## wow this is sooo BAD. Can't believe it
+## ggsave("Figures/CorRAW.pdf", corRaw, height = 15, width = 15)
+
+
+###New taxonomic assignment
+## should be set sysetem-wide, here just for clarity
+## Sys.setenv("BLASTDB" = "/SAN/db/blastdb/") 
+
+
+
+
+
+## This should acutally work with phyloseq's merge_samples function
+## but doesn't as this messes up sample_data.
+## CANDIDATE FOR INCLUSION IN PACKAGE...!
+sumTecRep <- function (PS, by.sample, fun=sum){
+    otab <- setDT(apply(otu_table(PS), 2, as.list))
+    ## the columns giving numbers for sequences
+    numcols <- colnames(otab)[nchar(colnames(otab))>10]
+    sdat <- sample_data(PS, errorIfNULL = FALSE)
+    otab[, (numcols):=lapply(.SD, as.numeric), .SDcols=numcols]
+    otab[, sfac := as.factor(sdat[[by.sample]])]
+    setkey(otab, sfac)
+    otabN <- otab[, lapply(.SD, fun), by=sfac]
+    setkey(otabN, sfac)
+    OTN <- as.matrix(otabN, rownames=TRUE)
+    ## now select the entries from colums that have the same values in
+    ## the sample table...
+    sdatN <- by(sdat, sdat[[by.sample]], function(x){
+        sapply(x, function (y){
+            uy <- unique(y)
+            if(length(uy)==1) uy else paste(uy, collapse=";")
+        })
+    })
+    sdatN <- as.data.frame(do.call(rbind, sdatN))
+    phyloseq(otu_table(OTN, taxa_are_rows=FALSE),
+             sample_data(sdatN),
+             tax_table(PS))
+}
+
+
+
