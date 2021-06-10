@@ -8,18 +8,30 @@ prune_prune <- function (ps, samples=0, taxa=10) {
     S <- prune_samples(!grepl("Negative", sample_names(s)), s)
     prune_taxa(taxa_sums(S) > taxa, S)
 }
-pseq.compositional <- microbiome::transform(pseq, "compositional")
 
 ## trying the species glomed dataset
 cBac <- microbiome::transform(
                         prune_prune(PBac, 20, 10),
                         "compositional")
 
+
+## cEuk <- subset_samples(PEuk, !sample_names(cEuk)%in%c("B4285", "B9157"))
+
+
 cEuk <- microbiome::transform(
-                        prune_prune(PEuk, 20, 10),
+                        prune_prune(PEuk, 40, 20),
                         "compositional")
 
+## cEuk <- subset_taxa(PEuk,
+##                      !phylum%in%c("Nematoda",
+##                                   "Apicomplexa",
+##                                   "Platyhelminthes"))
+
+
+## cEuk <- subset_taxa(cEuk, !(is.na(phylum)))
     
+
+
 
 library(vegan)
 
@@ -27,7 +39,7 @@ library(vegan)
 EDatrawBac <- sample_data(cBac)
 class(EDatrawBac) <- "data.frame"
 
-EDatrawEuk <- sample_data(cEuk)
+DatrawEuk <- sample_data(cEuk)
 class(EDatrawEuk) <- "data.frame"
 
 immuno <- c("cortisol", "neopterin", "lysozyme", "IgG", "IgA", "mucin")
@@ -58,11 +70,14 @@ BacEFit
 
 ### Eukaryote nMDS ###########################################
 
-EukData <- otu_table(cEuk)
-colnames(EukData) <- as.vector(tax_table(cEuk)[, "genus"])
+### Removing ASVs from the target taxa... to not associate those with
+### themselves
 
-mdsEuk <- vegan::metaMDS(EukData, try=350, trymax=350, k=3,
-                         noshare=0.3)
+
+
+EukData <- otu_table(cEuk)
+
+mdsEuk <- vegan::metaMDS(EukData, try=250, trymax=250, k=3)
 
 EukEFit <- envfit(mdsEuk, EDatEuk, na.rm=TRUE)
 EukEFit
@@ -71,7 +86,7 @@ EukEFit
 ### exporting the data for plotting with ggplot
 
 data.scoresEuk <-  as.data.frame(scores(mdsEuk))
-data.scoresEuk <- cbind(data.scoresEuk, EDatEuk)
+data.scoresEuk <- cbind(data.scoresEuk, EDatEuk[rownames(data.scoresEuk),])
 
 EnCoordEuk <-
     as.data.frame(
@@ -170,10 +185,11 @@ pdf("Figures/Age_Bac_ordi_EFit_sig.pdf")
 ggBacSig
 dev.off()
 
+data.scoresEuk$lab <- rownames(data.scoresEuk)
 
-
-ggEuk <-  ggplot(data = data.scoresEuk, aes(x = NMDS2, y = NMDS3)) +
-    geom_point(data = data.scoresEuk, aes(colour = age_sampling, shape=season),
+ggEuk <-  ggplot(data = data.scoresEuk, aes(x = NMDS1, y = NMDS2)) +
+    geom_label(data = data.scoresEuk, aes(colour = age_sampling, 
+                                          label=lab),
                size = 3, alpha = 0.5) +
     theme(axis.title = element_text(size = 10, face = "bold", colour = "grey30"),
           panel.background = element_blank(),
@@ -255,18 +271,18 @@ EDatNABac <- na.omit(EDatBac,
 
 BacDataNA <- BacData[rownames(EDatNABac),]
 
+EukSig
 
 EDatNAEuk <- na.omit(EDatEuk,
-                     cols=c("mucin", "age_sampling",
-                            "Ancylostoma_egg_load", "CSocialRank", 
+                     cols=c("mucin", "neopterin", "IgA", "age_sampling", "CSocialRank", 
                             "hyena_ID"))
 
 EukDataNA <- EukData[rownames(EDatNAEuk),]
 
 
 
-EukAdonis <- adonis2(EukDataNA ~ mucin + age_sampling + Ancylostoma_egg_load +
-                   CSocialRank, 
+EukAdonis <- adonis2(EukDataNA ~ mucin + neopterin + IgA +
+                         age_sampling + CSocialRank,
                      data=EDatNAEuk, na.action = na.omit, by="margin")
 
 
