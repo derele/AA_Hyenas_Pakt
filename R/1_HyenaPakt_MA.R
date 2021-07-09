@@ -439,6 +439,7 @@ PMS <- sumTecRep(PSS, by.sample="Sample")
 ## Now adding the annotation realy
 ## SDat <- read.csv("Data/Covariates_int_biomes.csv")
 
+SDat <- read.csv("~/Documents/microbiome_tagged_fitness_2021-06-15.csv")
 SDat <- read.csv("Data/Covariates_int_biomes_21-05-04.csv")
 
 SDat$sample_ID.x[SDat$sample_ID.x=="C47"]  <- "C0047"
@@ -449,7 +450,8 @@ SDat$CSocialRank <- rowMeans(SDat[, c("social_rank_hyena_ID",
                                       "social_rank_genetic_mum")],
                              na.rm=TRUE)
 
-newSdat <- merge(sample_data(PM), SDat, by.x=0, by.y="sample_ID.x", all.x=TRUE)
+newSdat <- merge(sample_data(PM), SDat, by.x=0,
+                 by.y="sample_ID.x", all.x=TRUE)
 rownames(newSdat) <- newSdat$Row.names
 newSdat$Row.names <- NULL
 
@@ -505,19 +507,14 @@ EukTib %>% filter(genus%in%"Ancylostoma") %>%
 
 AncyloCorDat %>% select_if(is.numeric) %>% cor()
 
+nrow(AncyloCorDat)
+
 cor.test(AncyloCorDat$sumAbu, AncyloCorDat$AncyMic)
 
-summary(lm(sumAbu~AncyMic, AncyloCorDat))
+summary(lm(log10(sumAbu+1)~log10(AncyMic+1), AncyloCorDat))
 
 pdf("Figures/Ancylostoma_Cor.pdf")
-EukTib %>% filter(genus%in%"Ancylostoma") %>%
-    select(Abundance, Sample, OTU, Ancylostoma_egg_load) %>%
-    group_by(Sample) %>%
-    summarize(sumAbu=sum(Abundance),
-              Sample=unique(Sample),
-              AncyMic=unique(Ancylostoma_egg_load)
-              ) %>% na.omit() %>%
-    ggplot(aes(AncyMic+1, sumAbu+1)) +
+ggplot(AncyloCorDat, aes(AncyMic+1, sumAbu+1)) +
     geom_point() +
     stat_smooth(method="lm") +
     scale_y_log10("Ancylostoma sequence abundance") +
@@ -542,7 +539,7 @@ CoccidiaCorDat %>%
     stat_smooth(method="lm") +
     scale_y_log10("Coccidia sequence abundance") +
     scale_x_log10("Cystoisospora oocyst load")
-dev.off()
+ndev.off()
 
 cor.test(CoccidiaCorDat$CystoMic, CoccidiaCorDat$sumAbu, method="spearman")
 
@@ -564,3 +561,4 @@ CystoisoCorDat %>%
 dev.off()
 
 cor.test(CystoisoCorDat$CytoMic, CystoisoCorDat$sumAbu, method="spearman")
+

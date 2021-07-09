@@ -39,7 +39,7 @@ library(vegan)
 EDatrawBac <- sample_data(cBac)
 class(EDatrawBac) <- "data.frame"
 
-DatrawEuk <- sample_data(cEuk)
+EDatrawEuk <- sample_data(cEuk)
 class(EDatrawEuk) <- "data.frame"
 
 immuno <- c("cortisol", "neopterin", "lysozyme", "IgG", "IgA", "mucin")
@@ -55,8 +55,10 @@ lhist <- c("season", "sampling_month",
            "age_sampling", "sex", "clan",
            "hyena_ID")
 
-EDatBac <- EDatrawBac[, c(immuno, para, lhist)]
-EDatEuk <- EDatrawEuk[, c(immuno, para, lhist)]
+fitn <- c("AFR", "LRS", "age_death", "Survival_Ad")
+
+EDatBac <- EDatrawBac[, c(immuno, para, lhist, fitn)]
+EDatEuk <- EDatrawEuk[, c(immuno, para, lhist, fitn)]
 
 
 ### Bacterial nMDS ##############################################
@@ -72,7 +74,6 @@ BacEFit
 
 ### Removing ASVs from the target taxa... to not associate those with
 ### themselves
-
 
 
 EukData <- otu_table(cEuk)
@@ -339,3 +340,75 @@ write.csv(round(BacAdonis, 4), "BacAdonis.csv")
 ##             Taeniidae_egg_load +Ancylostoma_egg_load + Cystoisospora_oocyst_load,
 ##         data=EDatNA_adult, na.action = na.omit, by="margin")
 
+
+
+## partial least squares regression
+
+library(caret)
+library(pls)
+
+foo <- cbind(EukData, sample_data(P)[rownames(EukData), "LRS.y"])
+foo <- foo[!is.na(foo$LRS.y), ]
+
+set.seed(123)
+training.samples <- sample(rownames(foo), size=0.8*nrow(foo))
+
+
+train.data  <- foo[training.samples, ]
+test.data <- foo[!rownames(foo)%in%training.samples, ]
+
+
+set.seed(123)
+model <- train(
+    LRS.y~., data = train.data, method = "pls",
+    scale = FALSE,
+    trControl = trainControl("cv", number = 10),
+    tuneLength = 10
+)
+## Plot model RMSE vs different values of components
+plot(model)
+## Print the best tuning parameter ncomp that
+## minimize the cross-validation error 
+
+summary(model$finalModel)
+
+## Make predictions
+predictions <- model %>% predict(test.data)
+## Model performance metrics
+
+data.frame(
+    RMSE = caret::RMSE(predictions, test.data$LRS.y),
+    Rsquare = caret::R2(predictions, test.data$LRS.y)
+)
+
+ggplot(data.frame(predictions, test.data$LRS.y),
+       aes(predictions, test.data.LRS.y)) +
+    geom_point()
+       
+
+
+foo <- cbind(EukData, sample_data(P)[rownames(EukData), "Survival_Ad.y"])
+foo <- foo[!is.na(foo$Survival_Ad.y), ]
+
+set.seed(123)
+training.samples <- sample(rownames(foo), size=0.8*nrow(foo))
+
+
+train.data  <- foo[training.samples, ]
+test.data <- foo[!rownames(foo)%in%training.samples, ]
+
+
+set.seed(123)
+model <- train(
+    Survival_Ad.y~., data = train.data, method = "pls",
+    scale = FALSE,
+    preProc= "center",
+    trControl = trainControl("cv", number = 10),
+    tuneLength = 10
+)
+## Plot model RMSE vs different values of components
+plot(model)
+## Print the best tuning parameter ncomp that
+## minimize the cross-validation error 
+
+summary(model$finalModel)

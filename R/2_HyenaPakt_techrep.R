@@ -85,3 +85,16 @@ names(corDataAmpASV) <- SAHY
 ### does not work as left out when no ASVs found for one ampMethod and
 ### sample!! (how this could happen is another weird story
 ## Reduce(rbind, corDataAmpASV)
+
+
+## some very low level direct sequence checking
+
+negatives <- sample_data(subset_samples(PH, grepl("Negative", Sample)))
+
+tapply(negatives$reads.in, negatives$ampMethod, summary)
+
+negatives[negatives$reads.in>70000, ]
+
+system("zcat /SAN/Victors_playground/Metabarcoding/AA_Hyena/2018_22_hyena2_run2/S228-P2-FLD0228_S228_L001_I1_001.fastq.gz  |  awk 'NR % 2 == 0'| awk 'NR % 2 == 1'| sort | uniq") 
+
+## GGTAGAATGA is the same as Index__Seq_Pool_2
