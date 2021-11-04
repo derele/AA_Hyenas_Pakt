@@ -2,7 +2,7 @@ library(GGally)
 library(parallel)
 
 if(!exists("PH", mode="S4")){
-    source("1_HyenaPakt_MA.R")
+    source("R/1_HyenaPakt_MA.R")
 }
 
 

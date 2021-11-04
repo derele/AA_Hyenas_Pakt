@@ -231,7 +231,7 @@ sumSample <- tibble(sampleIDs) %>%
     group_by(Sample, ampMethod) %>% drop_na() %>%
     summarise(FilteredReads = sum(reads.out), DNA_conc=unique(DNA_conc),
               P260_280 = unique(P260_280), P260_230 = unique(P260_230)) %>%
-    transform(fewReads = FilteredReads < quantile(FilteredReads, 0.1))
+    mutate(fewReads = FilteredReads < quantile(FilteredReads, 0.1))
 
 fewData <- subset(sumSample, fewReads)
 goodData <- subset(sumSample, !fewReads)
@@ -440,7 +440,7 @@ PMS <- sumTecRep(PSS, by.sample="Sample")
 ## SDat <- read.csv("Data/Covariates_int_biomes.csv")
 
 SDat <- read.csv("~/Documents/microbiome_tagged_fitness_2021-06-15.csv")
-SDat <- read.csv("Data/Covariates_int_biomes_21-05-04.csv")
+## SDat <- read.csv("Data/Covariates_int_biomes_21-05-04.csv")
 
 SDat$sample_ID.x[SDat$sample_ID.x=="C47"]  <- "C0047"
 SDat$sample_ID.x[SDat$sample_ID.x=="C52"]  <- "C0052"
@@ -458,10 +458,10 @@ newSdat$Row.names <- NULL
 sample_data(PM) <- newSdat
 sample_data(PMS) <- newSdat
 
-setdiff(SDat$sample_ID.x, sample_data(P)$Sample)
+setdiff(SDat$sample_ID.x, sample_data(PM)$Sample)
 ## Sequence covers them all!
 
-non.immuno <- setdiff(sample_data(P)$Sample, SDat$sample_ID.x)
+non.immuno <- setdiff(sample_data(PM)$Sample, SDat$sample_ID.x)
 grep("Negative", non.immuno, value=TRUE, invert=TRUE)
 ##   "B3456" "B6423" "X6674"
 
@@ -539,7 +539,7 @@ CoccidiaCorDat %>%
     stat_smooth(method="lm") +
     scale_y_log10("Coccidia sequence abundance") +
     scale_x_log10("Cystoisospora oocyst load")
-ndev.off()
+dev.off()
 
 cor.test(CoccidiaCorDat$CystoMic, CoccidiaCorDat$sumAbu, method="spearman")
 

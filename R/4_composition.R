@@ -1,6 +1,8 @@
-### FOR COMPOSITION WE USE proportional transformation
-
 library(microbiome)
+
+if(!exists("PBac")){
+    source("R/1_HyenaPakt_MA.R")
+}
 
 ############ Preparing datasets for ordination
 prune_prune <- function (ps, samples=0, taxa=10) {
@@ -9,6 +11,7 @@ prune_prune <- function (ps, samples=0, taxa=10) {
     prune_taxa(taxa_sums(S) > taxa, S)
 }
 
+### FOR COMPOSITION WE USE proportional transformation
 ## trying the species glomed dataset
 cBac <- microbiome::transform(
                         prune_prune(PBac, 20, 10),
