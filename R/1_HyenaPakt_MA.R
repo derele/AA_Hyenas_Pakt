@@ -442,8 +442,8 @@ PMS <- sumTecRep(PSS, by.sample="Sample")
 ## Now adding the annotation realy
 ## SDat <- read.csv("Data/Covariates_int_biomes.csv")
 
-SDat <- read.csv("~/Documents/microbiome_tagged_fitness_2021-06-15.csv")
-## SDat <- read.csv("Data/Covariates_int_biomes_21-05-04.csv")
+SDat <- read.csv("Data/microbiome_tagged_fitness_2021-06-30.csv")
+
 
 SDat <- read.csv("/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/Data/Covariates_int_biomes_21-05-04.csv")
 

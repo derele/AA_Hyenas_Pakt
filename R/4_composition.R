@@ -275,7 +275,6 @@ EDatNABac <- na.omit(EDatBac,
 
 BacDataNA <- BacData[rownames(EDatNABac),]
 
-EukSig
 
 EDatNAEuk <- na.omit(EDatEuk,
                      cols=c("mucin", "neopterin", "IgA", "age_sampling", "CSocialRank", 
@@ -350,24 +349,32 @@ write.csv(round(BacAdonis, 4), "BacAdonis.csv")
 library(caret)
 library(pls)
 
-foo <- cbind(EukData, sample_data(P)[rownames(EukData), "LRS.y"])
-foo <- foo[!is.na(foo$LRS.y), ]
+## Do this on a combined Eukaryote Bacterial dataset
+
+D <- merge(EukData, BacData, by=0)
+
+D <- merge(D, EDatBac, by.x="Row.names", by.y=0)
 
 set.seed(123)
-training.samples <- sample(rownames(foo), size=0.8*nrow(foo))
+training.samples <- sample(rownames(D), size=0.8*nrow(D))
+
+## remove other fitness variables but adult survival
+DAS <- D[, !colnames(D)%in%c("AFR", "age_death", "LRS")]
 
 
-train.data  <- foo[training.samples, ]
-test.data <- foo[!rownames(foo)%in%training.samples, ]
-
+train.data  <- DAS[training.samples, ]
+test.data <- DAS[!rownames(D)%in%training.samples, ]
 
 set.seed(123)
+
 model <- train(
-    LRS.y~., data = train.data, method = "pls",
+    Survival_Ad~., data = train.data, method = "rf",
     scale = FALSE,
     trControl = trainControl("cv", number = 10),
-    tuneLength = 10
+    tuneLength = 10,
+    na.action="na.omit"
 )
+
 ## Plot model RMSE vs different values of components
 plot(model)
 ## Print the best tuning parameter ncomp that
