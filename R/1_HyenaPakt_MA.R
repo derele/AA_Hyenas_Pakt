@@ -2,7 +2,7 @@
 
 require(devtools)
 ## load the devel version
-devtools::load_all("../MultiAmplicon")
+devtools::load_all("/SAN/Susanas_den/MultiAmplicon/")
 ## devtools::install_github("derele/MultiAmplicon", force= T)
 
 library(ggplot2)
@@ -20,22 +20,21 @@ library(dplyr)
 
 ## re-run or use pre-computed results for different parts of the pipeline:
 ## Set to FALSE to use pre-computed and saved results, TRUE to redo analyses.
-doQualEval <- FALSE
+doQualEval <- TRUE
 
-doFilter <- FALSE
+doFilter <- TRUE
 
-doMultiAmpSort <- FALSE
+doMultiAmpSort <- TRUE
 
-doMultiAmpError <- FALSE ## c("errEst", "direct")
+doMultiAmpError <- TRUE ## c("errEst", "direct")
 
-doMultiAmpPipe <- FALSE
+doMultiAmpPipe <- TRUE
     
-doTax <- FALSE
+doTax <- TRUE
 
 ###################Full run Microbiome#######################
 ## Preparation of files. These are the same steps that are followed by
 ## the DADA2 pipeline change according to where you downloaded
-
 
 path <- c(
     ## Hyena Pool 2 (Single amplicon run) 2nd Full sequencing Run (Good run)
@@ -357,6 +356,7 @@ if(doTax){
     unlink("/SAN/Victors_playground/Metabarcoding/AA_Hyena/Hyena_in.fasta")
     unlink("/SAN/Victors_playground/Metabarcoding/AA_Hyena/Hyena_out.blt")
 }
+
 MA.A <- blastTaxAnnot(MA.final,
                     db = "/SAN/db/blastdb/nt/nt",
                     negative_gilist = "/SAN/db/blastdb/uncultured.gi",
@@ -368,8 +368,11 @@ MA.A <- blastTaxAnnot(MA.final,
 
 ### more sample data
 
+saveRDS(MA.A, file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_blast.Rds")
 
-PH <- toPhyloseq(MA.A, samples=colnames(MA.A))
+source("/SAN/Susanas_den/gitProj/Eimeria_AmpSeq/R/toPhyloseq.R")
+
+PH <- TMPtoPhyloseq(MA.A, samples=colnames(MA.A))
 
 
 ## Does single Amplicon-Data differ from multiAmplicon
@@ -381,7 +384,7 @@ dev.off()
 
 
 ## this STILL! buggs FIXME in package!!
-## PH.list <- toPhyloseq(MA, samples=colnames(MA), multi2Single=FALSE)
+# PH.list <- toPhyloseq(MA, samples=colnames(MA), multi2Single=FALSE)
 
 ## Some first quick view at bacterial taxa...
 TT <- tax_table(PH)
@@ -442,6 +445,8 @@ PMS <- sumTecRep(PSS, by.sample="Sample")
 SDat <- read.csv("~/Documents/microbiome_tagged_fitness_2021-06-15.csv")
 ## SDat <- read.csv("Data/Covariates_int_biomes_21-05-04.csv")
 
+SDat <- read.csv("/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/Data/Covariates_int_biomes_21-05-04.csv")
+
 SDat$sample_ID.x[SDat$sample_ID.x=="C47"]  <- "C0047"
 SDat$sample_ID.x[SDat$sample_ID.x=="C52"]  <- "C0052"
 SDat$sample_ID.x[SDat$sample_ID.x=="C129"]  <- "C0129"
@@ -465,6 +470,8 @@ non.immuno <- setdiff(sample_data(PM)$Sample, SDat$sample_ID.x)
 grep("Negative", non.immuno, value=TRUE, invert=TRUE)
 ##   "B3456" "B6423" "X6674"
 
+saveRDS(PMS, "/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/PMS.rds")
+saveRDS(PM, "/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/PM.rds")
 
 ### ONE DATASET to start with P --- ONLY MULTIAMPLICON FOR NOW
 
