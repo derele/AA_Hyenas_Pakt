@@ -355,8 +355,6 @@ if(doMultiAmpPipe){
 if(doTax){
     unlink("/SAN/Victors_playground/Metabarcoding/AA_Hyena/Hyena_in.fasta")
     unlink("/SAN/Victors_playground/Metabarcoding/AA_Hyena/Hyena_out.blt")
-}
-
 MA.A <- blastTaxAnnot(MA.final,
                     db = "/SAN/db/blastdb/nt/nt",
                     negative_gilist = "/SAN/db/blastdb/uncultured.gi",
@@ -365,15 +363,81 @@ MA.A <- blastTaxAnnot(MA.final,
                     taxonSQL = "/SAN/db/taxonomy/taxonomizr.sql", 
                     num_threads = 64)
 
-
 ### more sample data
-
 saveRDS(MA.A, file="/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_blast.Rds")
+} else {
+MA.A <- readRDS("/SAN/Victors_playground/Metabarcoding/AA_Hyena/MA_blast.Rds")
+    }
 
-source("/SAN/Susanas_den/gitProj/Eimeria_AmpSeq/R/toPhyloseq.R")
+#### alternative taxonomic annotation
+# bit messy here now.
+# we first need to know the target of each amplicon
+primerL <- read.csv("/SAN/Susanas_den/gitProj/Eimeria_AmpSeq/data/primerInputUnique.csv")
+ptable$Primer_name <- paste(ptable$Name_F, ptable$Name_R, sep=".")
+primerL$Primer_name[6]<- "18S_0067a_deg_3Mod_53_F.NSR399_3Mod_53_R"
+primerL$Primer_name[120]<- "Bgf_132_F.Bgr_132_R"
+p.df <- primerL[which(primerL$Primer_name%in%ptable$Primer_name),]
+Unk <- ptable[which(!ptable$Primer_name %in% primerL$Primer_name),]
+Unk$Gen <- c("COI", "na", "tRNA", "COI")
+Unk <- Unk[,c("Primer_name", "Gen")]
+P.df <- rbind(p.df[,c("Primer_name", "Gen")], Unk)
+# now reorder
+idx <- match(ptable$Primer_name, P.df$Primer_name)
+P.df <- P.df[idx,]
+all(P.df$Primer_name==ptable$Primer_name)# sanity check
 
-PH <- TMPtoPhyloseq(MA.A, samples=colnames(MA.A))
+# now the taxonomic annotation per target
+taxT1 <- list()
+seqs <- getSequencesFromTable(MA.final)
+seqs <- lapply(seqs, DNAStringSet)
+for (i in 1:48){
+    if (P.df$Gen[i]=="16S"){
+        try(taxT1[[i]] <- assignTaxonomy(seqs[[i]],
+               "/SAN/Susanas_den/AmpMarkers/RESCRIPt/SSURef_NR99/Fastas/Slv138.dada2.fa",
+                                         multithread=20,
+                                         tryRC = TRUE,
+                                         verbose=TRUE))
+    }
+    else if (P.df$Gen[i]=="18S"){
+        try(taxT1[[i]] <- assignTaxonomy(seqs[[i]],
+               "/SAN/Susanas_den/AmpMarkers/RESCRIPt/SSURef_NR99/Fastas/Slv138.dada2.fa",
+                                         multithread=20,
+                                         tryRC = TRUE,
+                                         verbose=TRUE))
+    }
+    else if (P.df$Gen[i]=="28S"){
+        try(taxT1[[i]] <- assignTaxonomy(seqs[[i]],
+               "/SAN/Susanas_den/AmpMarkers/RESCRIPt/LSURef_NR99/Fastas/Slv138LSU.dada2.fa",
+                                         multithread=20,
+                                         tryRC = TRUE,
+                                         verbose=TRUE))
+    }
+    else if (P.df$Gen[i]=="ITS"){
+        try(taxT1[[i]] <- assignTaxonomy(seqs[[i]],
+               "/SAN/Susanas_den/AmpMarkers/UNITE/sh_general_release_s_all_10.05.2021/sh_general_release_dynamic_s_all_10.05.2021.fasta",
+                                         multithread=20,
+                                         tryRC = TRUE,
+                                         verbose=TRUE))
+    }
+    else {
+        try(taxT1[[i]] <- assignTaxonomy(seqs[[i]],
+               "/SAN/Susanas_den/AmpMarkers/RESCRIPt/other/Fastas/other.dada2.fa",
+                                         multithread=90,
+                                         tryRC = TRUE,
+                                         verbose=TRUE))
+    }
+}
+MA.final@taxonTable <- taxT1
 
+saveRDS(MA.final, file="/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/MA_Tax.Rds")
+
+
+
+source("/SAN/Susanas_den/gitProj/Eimeria_AmpSeq/R/toPhyloseq.R") # function is broken in the package
+
+PH <- TMPtoPhyloseq(MA.final, samples=colnames(MA.final))
+
+sample_names(PH)
 
 ## Does single Amplicon-Data differ from multiAmplicon
 pdf("./Figures/Bacterial_ampMethod_Richness.pdf")
@@ -384,17 +448,17 @@ dev.off()
 
 
 ## this STILL! buggs FIXME in package!!
-# PH.list <- toPhyloseq(MA, samples=colnames(MA), multi2Single=FALSE)
+PH.list <- TMPtoPhyloseq(MA.final, samples=colnames(MA.final), multi2Single=FALSE)
 
 ## Some first quick view at bacterial taxa...
 TT <- tax_table(PH)
 
-BacTT <- TT[TT[, "superkingdom"]%in%"Bacteria", ]
+BacTT <- TT[TT[, "Kingdom"]%in%"k__Bacteria", ]
 
-genusTab <- table(BacTT[, "genus"])
+genusTab <- table(BacTT[, "Genus"])
 
-write.csv(genusTab[order(genusTab, decreasing=TRUE)],
-          file="genus_table.csv", row.names=FALSE)
+#write.csv(genusTab[order(genusTab, decreasing=TRUE)],
+#          file="genus_table.csv", row.names=FALSE)
 
 
 ## First collapsing technical replcates!!
