@@ -5,13 +5,14 @@ library(tidyverse)
 library("frequency")
 library(httr)
 
-Hyena_O <-read.csv("~/GitProjects/AA_Hyenas_Pakt/Data/Hyena_DNA_Concentration.csv") ##Original concentrations
+Hyena_O <-read.csv("Data/Hyena_DNA_Concentration.csv") ##Original concentrations
+
 Hyena_O$Sample<- gsub(pattern = " ", replacement = "", x= Hyena_O$Sample)
 
 Hyena_O[duplicated(Hyena_O$Sample), ]
 Hyena_O %>% distinct(Sample, .keep_all= T)-> Hyena_O
 
-Hyena_F <-read.csv("~/GitProjects/AA_Hyenas_Pakt/Data/Hyena_DNA_Concentration_Speedvac.csv") ##After speedvac concentrations
+Hyena_F <-read.csv("Data/Hyena_DNA_Concentration_Speedvac.csv") ##After speedvac concentrations
 Hyena_F$Sample<- gsub(pattern = " ", replacement = "", x= Hyena_F$Sample)
 Hyena_F[duplicated(Hyena_F$Sample), ]
 Hyena_F %>% distinct(Sample, .keep_all= T)-> Hyena_F
@@ -73,7 +74,7 @@ c <- ggplot(Hyena, aes(x=P260_230_F, y=P260_280_F, color=DNA_conc_F)) +
   ylab("Purity (260/280 ratio)")+
   labs(tag = "C)")
 
-pdf("~/GitProjects/AA_Hyenas_Pakt/Figures/Hyena_DNA_Concentration.pdf", width=10,height=10)
+pdf("Figures/Hyena_DNA_Concentration.pdf", width=10,height=10)
 gridExtra::grid.arrange(a, b, c, ncol=3)
 dev.off()
 
@@ -96,11 +97,13 @@ table(Hyena$Final_selection == "Selected")
 #write.csv(Chip, "~/GitProjects/AA_Hyenas_Pakt/Data/Sample_distribution.csv")
 
 ##Add index information 
-Index_1 <-read.csv("~/AA_Hyena_Pakt/Index_Pool_1.csv") ##Pool 1 Dec 2019
-Index_2 <-read.csv("~/AA_Hyena_Pakt/Index_Pool_2.csv") ##Pool 2 Jan 2020
+Index_1 <-read.csv("Data/Index_Pool_1.csv") ##Pool 1 Dec 2019
+Index_2 <-read.csv("Data/Index_Pool_2.csv") ##Pool 2 Jan 2020
 Index<- merge(Index_1, Index_2, by= "Sample")
 
 rm(Hyena_F, Hyena_O, Index_1, Index_2)
 
 ###Final data set with all information including negatives 
 Hyena<- full_join(Hyena, Index, by= "Sample")
+
+head(Hyena)

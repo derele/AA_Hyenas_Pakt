@@ -437,35 +437,34 @@ source("/SAN/Susanas_den/gitProj/Eimeria_AmpSeq/R/toPhyloseq.R") # function is b
 
 PH <- TMPtoPhyloseq(MA.final, samples=colnames(MA.final))
 
-sample_names(PH)
 
 ## Does single Amplicon-Data differ from multiAmplicon
-pdf("./Figures/Bacterial_ampMethod_Richness.pdf")
-plot_richness(subset_taxa(PH, superkingdom%in%"Bacteria"),
+#pdf("./Figures/Bacterial_ampMethod_Richness.pdf")
+plot_richness(PH,
               measures=c("Observed", "Chao1", "Shannon"),
               "ampMethod")
-dev.off()
 
 
 ## this STILL! buggs FIXME in package!!
 PH.list <- TMPtoPhyloseq(MA.final, samples=colnames(MA.final), multi2Single=FALSE)
 
-## Some first quick view at bacterial taxa...
-TT <- tax_table(PH)
-
-BacTT <- TT[TT[, "Kingdom"]%in%"k__Bacteria", ]
-
-genusTab <- table(BacTT[, "Genus"])
-
-#write.csv(genusTab[order(genusTab, decreasing=TRUE)],
-#          file="genus_table.csv", row.names=FALSE)
-
-
 ## First collapsing technical replcates!!
 sample_data(PH)$Sample <- gsub("\\.2", "", sample_data(PH)$Sample)
 
+for (i in 1:length(PH.list)) {
+    sample_data(PH.list[[i]])$Sample <- gsub("\\.2", "", sample_data(PH.list[[i]])$Sample)
+}
+
+all(sample_names(PH)==sample_names(PH.list[[1]])) # sanity check
+
+
 ##  testing the oucome if only using singleAmpData
 PSS <- subset_samples(PH, ampMethod%in%"MultiAmp")
+
+PSS.l <- list()
+for (i in 1:length(PH.list)) {
+    try(PSS.l[[i]] <- subset_samples(PH.list[[i]], ampMethod%in%"MultiAmp"))
+}
 
 ## This should acutally work with phyloseq's merge_samples function
 ## but doesn't as this messes up sample_data.
@@ -503,13 +502,17 @@ sumTecRep <- function (PS, by.sample, fun=sum){
 PM <- sumTecRep(PH, by.sample="Sample")
 PMS <- sumTecRep(PSS, by.sample="Sample")
 
+PMS.l <- list()
+for (i in 1:length(PSS.l)) {
+    try(PMS.l[[i]] <- sumTecRep(PSS.l[[i]], by.sample="Sample"))
+}
+
+all(sample_names(PMS)==sample_names(PMS.l[[1]])) # another sanity check
+
 ## Now adding the annotation realy
 ## SDat <- read.csv("Data/Covariates_int_biomes.csv")
 
-SDat <- read.csv("Data/microbiome_tagged_fitness_2021-06-30.csv")
-
-
-SDat <- read.csv("/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/Data/Covariates_int_biomes_21-05-04.csv")
+SDat <- read.csv("/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/Data/microbiome_tagged_fitness_2021-06-30.csv")
 
 SDat$sample_ID.x[SDat$sample_ID.x=="C47"]  <- "C0047"
 SDat$sample_ID.x[SDat$sample_ID.x=="C52"]  <- "C0052"
@@ -534,9 +537,188 @@ non.immuno <- setdiff(sample_data(PM)$Sample, SDat$sample_ID.x)
 grep("Negative", non.immuno, value=TRUE, invert=TRUE)
 ##   "B3456" "B6423" "X6674"
 
-saveRDS(PMS, "/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/PMS.rds")
-saveRDS(PM, "/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/PM.rds")
+### Removing contaminants
+library("decontam")
+all(sample_names(PMS)==rownames(PMS@sam_data)) # sanity check
 
+PMS_neg <- subset_samples(PMS, grepl("Negative",rownames(PMS@otu_table)))
+
+PMS@sam_data$Control <- FALSE
+PMS@sam_data$Control[which(sample_names(PMS)%in%sample_names(PMS_neg))] <- TRUE
+
+for (i in 1:length(PSS.l)) {
+    PMS.l[[i]]@sam_data$Control <- FALSE
+PMS.l[[i]]@sam_data$Control[which(sample_names(PMS.l[[i]])%in%sample_names(PMS_neg))] <- TRUE
+}
+
+# sanity check
+PMS@sam_data$Sample[PMS@sam_data$Control==FALSE]
+rownames(PMS@sam_data)[PMS@sam_data$Control==TRUE]
+
+# assuming that negative controls have DNA concentration of 0
+PMS@sam_data$DNA_conc[PMS@sam_data$Control==TRUE] <- 0.0001
+
+# a few values have 2 measures. let'S just consider the first.
+PMS@sam_data$DNA_conc[179] <- 98.9
+PMS@sam_data$DNA_conc[196] <- 51
+PMS@sam_data$DNA_conc[215] <- 48.1
+
+PMS@sam_data$DNA_conc <- as.numeric(PMS@sam_data$DNA_conc)
+
+## ----see-depths---------------------------------------------------------------
+df <- as.data.frame(sample_data(PMS)) # Put sample_data into a ggplot-friendly data.frame
+df$LibrarySize <- sample_sums(PMS)
+df <- df[order(df$LibrarySize),]
+df$Index <- seq(nrow(df))
+#ggplot(data=df, aes(x=Index, y=LibrarySize, color=Control)) + geom_point()
+
+
+contamdf.freq <- isContaminant(PMS, method="either", conc="DNA_conc", neg="Control", threshold=c(0.1,0.5), normalize=TRUE)
+
+table(contamdf.freq$contaminant)
+
+### taxa to remove
+PMS@tax_table[rownames(contamdf.freq[contamdf.freq$contaminant==TRUE,]),5]
+
+## let's remove them now and negative controls
+
+Keep <- rownames(contamdf.freq[contamdf.freq$contaminant==FALSE,])
+PMS <- prune_samples(sample_data(PMS)$Control == FALSE, PMS)
+PMS <- prune_taxa(Keep, PMS)
+
+saveRDS(PMS, "/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/PMS_decontan.rds")
+#saveRDS(PM, "/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/PM.rds")
+
+## adding metadata, removing contaminants and controls
+for (i in 1:length(PMS.l)) {
+    try(PMS.l[[i]] <- prune_taxa(Keep, PMS.l[[i]]), silent=TRUE)
+    try(PMS.l[[i]] <- prune_samples(sample_data(PMS.l[[i]])$Control == FALSE, PMS.l[[i]]), silent=TRUE)
+}
+
+for (i in 1:length(PMS.l)) {
+    try(PMS.l[[i]]@sam_data <- PMS@sam_data, silent=TRUE)
+}
+
+
+# abundance filtering at 0.005%
+
+fil <- function(ps){
+    x = phyloseq::taxa_sums(ps)
+    # abundance filtering at 0.005%
+    keepTaxa = (x / sum(x) > 0.00005)
+    summary(keepTaxa)
+    ps = phyloseq::prune_taxa(keepTaxa, ps)
+# plus prevalnce filter at 1%
+    KeepTaxap <- microbiome::prevalence(ps)>0.01
+    ps <- phyloseq::prune_taxa(KeepTaxap, ps)
+# subset samples based on total read count (100 reads)
+    ps <- phyloseq::prune_samples(sample_sums(ps)>100, ps)
+    ps
+    }
+
+## filtering MA by amplicon
+fPMS.l <- list()
+for (i in 1:length(PMS.l)) {
+    try(fPMS.l[[i]] <- fil(PMS.l[[i]]), silent=TRUE)
+}
+
+
+#### let's transform by amplicon
+TPMS.l <- list() # a list of normalised amplicons
+for (i in 1:length(fPMS.l)) {
+    try(TPMS.l[[i]] <- transform_sample_counts(fPMS.l[[i]], function(x) x / sum(x)), silent=TRUE)
+}
+
+# And now merge
+TPMS <- TPMS.l[[1]] # one phyloseq objects with all the amplicons normalised individually
+for (i in 2:length(TPMS.l)){
+    TPMS <- try(merge_phyloseq(TPMS,TPMS.l[[i]]))
+}
+
+TPMS
+
+
+# remove those ugly handlers
+tax_table(TPMS)[,colnames(tax_table(TPMS))] <- gsub(tax_table(TPMS)[, colnames(tax_table(TPMS))], pattern="[a-z]__", replacement="")
+
+### let's clean up genus column in the tax table
+all(sample_names(TPMS)==sample_names(TPMS))
+tax <- as.data.frame(tax_table(TPMS))
+
+tax$Kingdom[is.na(tax$Kingdom)] <- "Unknown_domain"
+
+
+tax$Kingdom[!tax$Kingdom%in%c("Bacteria", "Archaea", "Unknown_domain")] <- "Eukarya"
+
+tax[is.na(tax$Genus),]$Genus <- paste0("Unknown_genus_in_",tax[is.na(tax$Genus),]$Family)
+
+tax[which(tax$Genus=="Unknown_genus_in_NA"),]$Genus<-paste0("Unknown_genus_in_",tax[which(tax$Genus=="Unknown_genus_in_NA"),]$Order)
+
+tax[which(tax$Genus=="Unknown_genus_in_NA"),]$Genus<-paste0("Unknown_genus_in_",tax[which(tax$Genus=="Unknown_genus_in_NA"),]$Class)
+tax[which(tax$Genus=="Unknown_genus_in_NA"),]$Genus<-paste0("Unknown_genus_in_",tax[which(tax$Genus=="Unknown_genus_in_NA"),]$Phylum)
+tax[which(tax$Genus=="Unknown_genus_in_NA"),]$Genus<-paste0("Unknown_genus_in_",tax[which(tax$Genus=="Unknown_genus_in_NA"),]$Kingdom)
+
+tax$Phylum[is.na(tax$Phylum)] <- "Unknown_phylum"
+
+tax$Class[is.na(tax$Class)] <- "Unknown_class"
+tax$Order[is.na(tax$Order)] <- "Unknown_order"
+tax[which(tax$Genus=="uncultured"),"Genus"] <- paste(tax[which(tax$Genus=="uncultured"),"Order"], tax[which(tax$Genus=="uncultured"),"Genus"], sep="_")
+
+TPMS@tax_table <-tax_table(as.matrix(tax))
+
+library(phyloseq)
+library(Hmisc)
+library(Matrix)
+library(igraph)
+
+saveRDS(TPMS, "/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/PMS_tmp.rds")
+
+### merge taxa based on correlations per genus
+genus <- get_taxa_unique(TPMS, "Genus")
+
+
+for (i in 1:length(genus)){
+    print(genus[i])
+    Kaza <- prune_taxa(tax_table(TPMS)[,6]%in%genus[i], TPMS)
+    kaza <- (Kaza@otu_table)
+    tax <- data.frame(Kaza@tax_table)
+############ correlation matrix################
+    otu.cor <- rcorr(as.matrix(kaza), type="spearman")
+    # p value
+    otu.pval <- forceSymmetric(otu.cor$P)
+    cor.p <- p.adjust(otu.pval, method="BH") # adjusting for multiple testing
+    otu.pval@x<- cor.p
+    p.yes <- otu.pval<0.05 # only significant p values
+    r.val = otu.cor$r # select all the correlation values
+    p.yes.r <- r.val*p.yes # only select correlation values based on p-value criterion
+    # sanity check
+    all(rownames(p.yes.r)==colnames(kaza))
+############# network basded on the correlation adjancency matrix
+    adjm <- as.matrix(p.yes.r)
+                                        #ignoring NAs
+    adjm[is.na(adjm)] <- 0
+    net.grph=graph.adjacency(adjm,mode="undirected",weighted=TRUE,diag=FALSE)
+### remove negative edges
+    net=delete.edges(net.grph, which(E(net.grph)$weight<0)) # here's my condition.
+    plot(net,
+         vertex.label="")
+    oc <- cluster_fast_greedy(net) # cluster
+    # and now we merge based on the clustered modules
+    group <- list()
+    for (i in 1:length(levels(as.factor(oc$membership)))){
+        group[[i]] <- oc$names[which(oc$membership==i)]
+        TPMS <- merge_taxa(TPMS, group[[i]])
+    }
+}
+
+
+TPMS
+
+# ok now I save and this is the table I will use.
+saveRDS(TPMS, "/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/fPMS.rds")
+
+
+############# I am ignorning from here on, will remove later
 ### ONE DATASET to start with P --- ONLY MULTIAMPLICON FOR NOW
 
 ### exclude super weird taxa
@@ -544,7 +726,7 @@ P <- subset_taxa(PMS, superkingdom%in%c("Bacteria", "Eukaryota"))
 
 ## Exclude off-target Eukaryote taxa 
 P <- subset_taxa(P, !phylum%in%c("Chordata",
-                                 "Chlorophyta",
+#                                 "Chlorophyta",
                                  "Streptophyta"
                                  ))
 
