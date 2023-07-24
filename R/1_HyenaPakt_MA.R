@@ -431,18 +431,17 @@ MA.final@taxonTable <- taxT1
 
 saveRDS(MA.final, file="/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/MA_Tax.Rds")
 
-
+MA.final <- readRDS("tmp/MA_Tax.Rds")
 
 source("/SAN/Susanas_den/gitProj/Eimeria_AmpSeq/R/toPhyloseq.R") # function is broken in the package
 
 PH <- TMPtoPhyloseq(MA.final, samples=colnames(MA.final))
 
-
 ## Does single Amplicon-Data differ from multiAmplicon
 #pdf("./Figures/Bacterial_ampMethod_Richness.pdf")
-plot_richness(PH,
-              measures=c("Observed", "Chao1", "Shannon"),
-              "ampMethod")
+#plot_richness(PH,
+#              measures=c("Observed", "Chao1", "Shannon"),
+#              "ampMethod")
 
 
 ## this STILL! buggs FIXME in package!!
@@ -454,18 +453,15 @@ sample_data(PH)$Sample <- gsub("\\.2", "", sample_data(PH)$Sample)
 for (i in 1:length(PH.list)) {
     sample_data(PH.list[[i]])$Sample <- gsub("\\.2", "", sample_data(PH.list[[i]])$Sample)
 }
-
 all(sample_names(PH)==sample_names(PH.list[[1]])) # sanity check
 
 
 ##  testing the oucome if only using singleAmpData
 PSS <- subset_samples(PH, ampMethod%in%"MultiAmp")
-
 PSS.l <- list()
 for (i in 1:length(PH.list)) {
     try(PSS.l[[i]] <- subset_samples(PH.list[[i]], ampMethod%in%"MultiAmp"))
 }
-
 ## This should acutally work with phyloseq's merge_samples function
 ## but doesn't as this messes up sample_data.
 ## CANDIDATE FOR INCLUSION IN PACKAGE...!
@@ -498,15 +494,12 @@ sumTecRep <- function (PS, by.sample, fun=sum){
                  sample_data(sdatN))
     }
 }
-
 PM <- sumTecRep(PH, by.sample="Sample")
 PMS <- sumTecRep(PSS, by.sample="Sample")
-
 PMS.l <- list()
 for (i in 1:length(PSS.l)) {
     try(PMS.l[[i]] <- sumTecRep(PSS.l[[i]], by.sample="Sample"))
 }
-
 all(sample_names(PMS)==sample_names(PMS.l[[1]])) # another sanity check
 
 ## Now adding the annotation realy
@@ -589,6 +582,8 @@ PMS <- prune_taxa(Keep, PMS)
 saveRDS(PMS, "/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/PMS_decontan.rds")
 #saveRDS(PM, "/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/PM.rds")
 
+PMS <- readRDS("tmp/PMS_decontan.rds")
+
 ## adding metadata, removing contaminants and controls
 for (i in 1:length(PMS.l)) {
     try(PMS.l[[i]] <- prune_taxa(Keep, PMS.l[[i]]), silent=TRUE)
@@ -601,7 +596,6 @@ for (i in 1:length(PMS.l)) {
 
 
 # abundance filtering at 0.005%
-
 fil <- function(ps){
     x = phyloseq::taxa_sums(ps)
     # abundance filtering at 0.005%
@@ -664,7 +658,10 @@ tax$Class[is.na(tax$Class)] <- "Unknown_class"
 tax$Order[is.na(tax$Order)] <- "Unknown_order"
 tax[which(tax$Genus=="uncultured"),"Genus"] <- paste(tax[which(tax$Genus=="uncultured"),"Order"], tax[which(tax$Genus=="uncultured"),"Genus"], sep="_")
 
+unique(tax$Genus)
+
 TPMS@tax_table <-tax_table(as.matrix(tax))
+
 
 library(phyloseq)
 library(Hmisc)
@@ -673,37 +670,44 @@ library(igraph)
 
 saveRDS(TPMS, "/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/PMS_tmp.rds")
 
+TPMS <- readRDS("tmp/PMS_tmp.rds")
+
 ### merge taxa based on correlations per genus
 genus <- get_taxa_unique(TPMS, "Genus")
 
+tax <- as.data.frame(tax_table(TPMS))
+
+summary(is.na(TPMS@tax_table[,6])) # sanity check that there's no NAs
 
 for (i in 1:length(genus)){
+#mergingASV <- function(PS.T, gen){
     print(genus[i])
     Kaza <- prune_taxa(tax_table(TPMS)[,6]%in%genus[i], TPMS)
+#    Kaza <- prune_samples(sample_sums(Kaza)>0, Kaza)
     kaza <- (Kaza@otu_table)
     tax <- data.frame(Kaza@tax_table)
 ############ correlation matrix################
     otu.cor <- rcorr(as.matrix(kaza), type="spearman")
-    # p value
+# p value
     otu.pval <- forceSymmetric(otu.cor$P)
     cor.p <- p.adjust(otu.pval, method="BH") # adjusting for multiple testing
     otu.pval@x<- cor.p
     p.yes <- otu.pval<0.05 # only significant p values
     r.val = otu.cor$r # select all the correlation values
     p.yes.r <- r.val*p.yes # only select correlation values based on p-value criterion
-    # sanity check
-    all(rownames(p.yes.r)==colnames(kaza))
+# sanity check
+#all(rownames(p.yes.r)==colnames(kaza))
 ############# network basded on the correlation adjancency matrix
     adjm <- as.matrix(p.yes.r)
-                                        #ignoring NAs
+#ignoring NAs
     adjm[is.na(adjm)] <- 0
     net.grph=graph.adjacency(adjm,mode="undirected",weighted=TRUE,diag=FALSE)
 ### remove negative edges
     net=delete.edges(net.grph, which(E(net.grph)$weight<0)) # here's my condition.
-    plot(net,
-         vertex.label="")
+#plot(net,
+#     vertex.label="")
     oc <- cluster_fast_greedy(net) # cluster
-    # and now we merge based on the clustered modules
+# and now we merge based on the clustered modules
     group <- list()
     for (i in 1:length(levels(as.factor(oc$membership)))){
         group[[i]] <- oc$names[which(oc$membership==i)]
@@ -711,13 +715,42 @@ for (i in 1:length(genus)){
     }
 }
 
-
 TPMS
+
+get_taxa_unique(TPMS, "Order")
+
+get_taxa_unique(TPMS, "Genus")
+
+
+TPMS@tax_table[which(is.na(TPMS@tax_table[,6])),]
+
+which(is.na(TPMS@tax_table[,6]))
+
+TPMS@tax_table[80,]
+TPMS@tax_table[80,6] <- "Unknown_genus_in_Eukarya"
+TPMS@tax_table[80,5] <- "Unknown_family_in_Eukarya"
+TPMS@tax_table[80,2] <- "Unknown_phylum_in_Eukarya"
+
+TPMS@tax_table[166,]
+TPMS@tax_table[166,6] <- "Unknown_genus_in_Pleosporales"
+TPMS@tax_table[166,5] <- "Unknown_family_in_Pleosporales"
+
+TPMS@tax_table[178,]
+TPMS@tax_table[178,6] <- "Unknown_genus_in_Apicomplexa"
+TPMS@tax_table[178,5] <- "Unknown_family_in_Apicomplexa"
+
+TPMS@tax_table[475,]
+TPMS@tax_table[475,6] <- "Unknown_genus_in_Chlorophyceae"
+TPMS@tax_table[475,5] <- "Unknown_family_in_Chlorophyceae"
+
+
+which(is.na(TPMS@tax_table[,6]))
 
 # ok now I save and this is the table I will use.
 saveRDS(TPMS, "/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/fPMS.rds")
 
 
+###############################################################################
 ############# I am ignorning from here on, will remove later
 ### ONE DATASET to start with P --- ONLY MULTIAMPLICON FOR NOW
 
