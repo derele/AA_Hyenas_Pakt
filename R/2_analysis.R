@@ -8,6 +8,34 @@ library(vegan)
 PMS <- readRDS("/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/fPMS.rds")
 PMS <- prune_taxa(taxa_sums(PMS)>0, PMS)
 
+
+# we want to add genetic mum and surrogate mum, in the future this will be done directly in MA. For now, we do it here
+mytable <- read.csv("Data/Covariates_int_biomes_23-06-29.csv")
+metadt <- sample_data(PMS)
+mytable <- mytable[match(metadt$hyena_ID, mytable$hyena_ID),]
+all(metadt$hyena_ID==mytable$hyena_ID) # looks good
+
+names(mytable)
+
+metadt$ID_sib <- mytable$ID_sib
+metadt$genetic_mum <- mytable$genetic_mum
+metadt$surrogate_mum <- mytable$surrogate_mum
+
+# now some more data cleanig and prep
+# we have some NA's at the social rank, for juveniles whose genetic mums were dead at hte time of sampling. We will give them the social rank of their surrogate mums
+
+metadt[is.na(metadt$CSocialRank),]
+
+# B8423 and B8180 have 2 surrogate mums. Let's give them a mean social rank.
+#B8427, B8738 and B8833 have 1 surrogate mum and we will give them that social rank.
+
+metadt[metadt$Sample%in%c("B8427", "B8738", "B8833"),"CSocialRank"] <- metadt[metadt$Sample%in%c("B8427", "B8738", "B8833"),"social_rank_surrogate_mum1"]
+
+str(metadt[metadt$Sample%in%c("B8423", "B8180"),"social_rank_surrogate_mum1"])
+
+mean(metadt[metadt$Sample%in%c("B8423", "B8180"),"social_rank_surrogate_mum1"], metadt[metadt$Sample%in%c("B8423", "B8180"),"social_rank_surrogate_mum2"])
+
+
 sample_data(PMS)$AFR[sample_data(PMS)$Survival_Ad=="No"] # this makes sense
 
 #sample_data(PMS)$LRS[sample_data(PMS)$Survival_Ad=="No"] <- 0 # gonna set this to zero, since dead animals don't reproduce
