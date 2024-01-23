@@ -2,443 +2,345 @@ library(ggplot2)
 library(phyloseq)
 library(vegan)
 #library(tidyverse)
-
+library(cowplot)
+library(RColorBrewer) # needed for some extra colours in one of the graphs
+library(vegan)
+library(phyloseq)
+library(igraph)
+library(Hmisc)
+library(Matrix)
+library(SpiecEasi)
+library(microbiome)
 
 
 PMS <- readRDS("/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/fPMS.rds")
 PMS <- prune_taxa(taxa_sums(PMS)>0, PMS)
 
-
-# we want to add genetic mum and surrogate mum, in the future this will be done directly in MA. For now, we do it here
-mytable <- read.csv("Data/Covariates_int_biomes_23-06-29.csv")
-metadt <- sample_data(PMS)
-mytable <- mytable[match(metadt$hyena_ID, mytable$hyena_ID),]
-all(metadt$hyena_ID==mytable$hyena_ID) # looks good
-
-names(mytable)
-
-metadt$ID_sib <- mytable$ID_sib
-metadt$genetic_mum <- mytable$genetic_mum
-metadt$surrogate_mum <- mytable$surrogate_mum
-
-# now some more data cleanig and prep
-# we have some NA's at the social rank, for juveniles whose genetic mums were dead at hte time of sampling. We will give them the social rank of their surrogate mums
-
-metadt[is.na(metadt$CSocialRank),]
-
-# B8423 and B8180 have 2 surrogate mums. Let's give them a mean social rank.
-#B8427, B8738 and B8833 have 1 surrogate mum and we will give them that social rank.
-
-metadt[metadt$Sample%in%c("B8427", "B8738", "B8833"),"CSocialRank"] <- metadt[metadt$Sample%in%c("B8427", "B8738", "B8833"),"social_rank_surrogate_mum1"]
-
-str(metadt[metadt$Sample%in%c("B8423", "B8180"),"social_rank_surrogate_mum1"])
-
-mean(metadt[metadt$Sample%in%c("B8423", "B8180"),"social_rank_surrogate_mum1"], metadt[metadt$Sample%in%c("B8423", "B8180"),"social_rank_surrogate_mum2"])
-
-
-sample_data(PMS)$AFR[sample_data(PMS)$Survival_Ad=="No"] # this makes sense
-
-#sample_data(PMS)$LRS[sample_data(PMS)$Survival_Ad=="No"] <- 0 # gonna set this to zero, since dead animals don't reproduce
-#sample_data(PMS)$LRS # still quite some NAs, why?
-
-#let's input what we can
-library(mice)
-pMiss <- function(x){sum(is.na(x))/length(x)*100}
-apply(PMS@sam_data,2,pMiss)
-
-# to input: CSocialRank;
-df <- data.frame(Sample=PMS@sam_data$Sample, SocialRank=PMS@sam_data$CSocialRank)
-socialR <- mice(df, m=5, maxit=50, meth="pmm", seed=500)
-socialR <- complete(socialR, 1)
-PMS@sam_data$CSocialRank_inputed <- socialR$SocialRank
-
-# to input: mucin
-df <- data.frame(Sample=PMS@sam_data$Sample, mucin=PMS@sam_data$mucin)
-Mucin <- mice(df, m=5, maxit=50, meth="pmm", seed=500)
-Mucin <- complete(Mucin, 1)
-PMS@sam_data$mucin_inputed<- Mucin$mucin
-
-# to input: IgA
-df <- data.frame(Sample=PMS@sam_data$Sample, IgA=PMS@sam_data$IgA)
-IGA <- mice(df, m=5, maxit=50, meth="pmm", seed=500)
-IGA <- complete(IGA, 1)
-PMS@sam_data$IgA_inputed<- IGA$IgA
-
-#defining Clan
-PMS@sam_data$Clan <- substr(PMS@sam_data$hyena_ID, 1,1)
-
-jac <- vegdist(PMS@otu_table, method="jaccard")
-bray <- vegdist(PMS@otu_table, method="bray")
-
-permajac <- adonis2(jac~
-                    PMS@sam_data$CSocialRank_inputed+
-                    PMS@sam_data$age_sampling+
-                    PMS@sam_data$sex+
-                    PMS@sam_data$IgA_inputed+
-                    PMS@sam_data$mucin_inputed+
-                    PMS@sam_data$Clan+
-                    PMS@sam_data$Survival_Ad+
-                    PMS@sam_data$season,
-                    strata=PMS@sam_data$hyena_ID,
-                    by="margin")
-
-permabray <- adonis2(bray~
-                    PMS@sam_data$CSocialRank_inputed+
-                    PMS@sam_data$Clan+
-                    PMS@sam_data$IgA_inputed+
-                    PMS@sam_data$mucin_inputed+
-                    PMS@sam_data$Survival_Ad+
-                    PMS@sam_data$age_sampling+
-                    PMS@sam_data$sex+
-                    PMS@sam_data$season,
-                    strata=PMS@sam_data$hyena_ID,
-                    by="margin")
-
-
-permajac
-permabray
-
-otu <- otu_table(PMS)
-colnames(otu) <- as.vector(tax_table(PMS)[,"Genus"])
-mds <- vegan::metaMDS(otu, try=350, k=3)
-#plot(mds)
-
-df <- PMS@sam_data
-class(df) <- "data.frame"
-cplot(mds)
-names(df)
-
-ordiplot(mds, type="n")
-orditorp(mds, display="species", col="red", air=0.01)
-orditorp(mds, display="sites")
-
-class(mds)
-
-
-mds.fit <- envfit(mds~fGCM+IgA+IgG+mucin+age_sampling+ CSocialRank_inputed+ season+ sex + Survival_Ad + hyena_ID + age_death + clan + LRS, data=df, na.rm=TRUE)
-
-data.scores <- as.data.frame(vegan::scores(mds)$sites)
-
-all(rownames(data.scores)==rownames(df))
-data.scores <- cbind(data.scores, df[rownames(data.scores),c("fGCM", "IgA", "mucin", "age_sampling", "CSocialRank_inputed", "season", "sex", "Survival_Ad", "hyena_ID", "age_death", "clan", "LRS")])
-
-mds.fit$vectors
-
-
-
-EnCoord <- as.data.frame(rbind(vegan::scores(mds.fit, "vectors")*
-      ordiArrowMul(mds.fit),
-      vegan::scores(mds.fit, "factors")*
-      ordiArrowMul(mds.fit)))
-
-
-EnCoord$Cat <- ifelse(rownames(EnCoord)%in%c("fGCM", "IgA", "mucin", "age_death", "LRS"), "plot", "notplot")
-
-NMDS_env <-ggplot(data.scores, aes(x=NMDS1, y=NMDS2))+
-        geom_segment(aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
-                    data = subset(EnCoord, Cat=="plot"), size =1, alpha = 0.5) +
-    geom_point(data=data.scores, shape=21, aes(fill=age_sampling), size=3, alpha=0.5)+
-    geom_point(data = subset(EnCoord, Cat=="plot"), aes(x = NMDS1, y = NMDS2),
-                  shape = 4, size = 4, alpha = 0.6)+
-        geom_text(data = subset(EnCoord, Cat=="plot"), aes(x = NMDS1, y = NMDS2+0.04),
-             label = rownames(subset(EnCoord, Cat=="plot")), colour = "red", fontface = "bold")+
-    scale_fill_gradient2(midpoint=365, low="blue", mid="lightblue", high="red", space ="Lab" )+
-    labs(x = "NMDS axis 1", y = "NMDS axis 2", fill = "Age at sampling") +
-    theme_bw(base_size=12)+
-    theme(legend.position = "right",
-          panel.grid.major = element_blank(),
-          panel.grid.minor = element_blank(),
-          axis.line = element_line(color = "black"),
-          legend.key.size = unit(1.2, "lines"),
-          legend.title = element_text(size = 12, face = "bold"),
-          legend.text = element_text(size = 11),
-          axis.text = element_text(size = 11),
-          axis.title = element_text(size = 12, face = "bold"),
-          plot.title = element_text(size = 14, face = "bold"))
-
-NMDS_env
-
-ggsave("Figures/NMDS_env.pdf", NMDS_env, width=150, height=150, units="mm", dpi=300)
-
-## permanova on juveniles
-## partial least squares regression
-library(caret)
-library(pls)
-
-Juv <-df[df$age_sampling_cat=="sampled_as_juvenile",]
-JPS <- subset_samples(PMS, age_sampling_cat=="sampled_as_juvenile")
-Juv <- Juv[, colnames(Juv)%in%c("age_sampling", "CSocialRank_inputed", "season", "sex", "Survival_Ad", "hyena_ID", "clan")]
-JuvM <- data.frame(otu_table(JPS), Juv)
-JuvM$season <- as.factor(Juv$season)
-JuvM$sex <- as.factor(Juv$sex)
-JuvM$Survival_Ad <- as.factor(Juv$Survival_Ad)
-JuvM$clan <- as.factor(Juv$clan)
-JuvM$hyena_ID <- as.factor(Juv$hyena_ID)
-
-PMS@sam_data$season <- as.factor(PMS@sam_data$season)
-PMS@sam_data$sex <- as.factor(PMS@sam_data$sex)
-PMS@sam_data$Survival_Ad <- as.factor(PMS@sam_data$Survival_Ad)
-PMS@sam_data$clan <- as.factor(PMS@sam_data$clan)
-PMS@sam_data$hyena_ID <- as.factor(PMS@sam_data$hyena_ID)
-
-
-str(sample_data(PMS)$hyena_ID)
-
-set.seed(123)
-training.samples <- sample(sample_names(PMS), size=0.8*nrow(PMS@sam_data))
-
-train.dataPS <- subset_samples(PMS, sample_names(PMS)%in%training.samples)
-test.dataPS <- subset_samples(PMS, !sample_names(PMS)%in%training.samples)
-
-levels(PMS@sam_data$hyena_ID)
-
-train.df <- data.frame(otu_table(train.dataPS), train.dataPS@sam_data[, c("age_sampling", "clan", "sex", "season", "CSocialRank_inputed", "Survival_Ad")])
-
-test.df <- data.frame(otu_table(test.dataPS), test.dataPS@sam_data[, c("age_sampling", "clan", "sex", "season", "CSocialRank_inputed", "Survival_Ad")])
-
-set.seed(123)
-model <- train(
-    age_sampling~., data=train.df, method="pls")
-#    scale=TRUE,
-#    trControl=trainControl("cv", number=10),
-#   tuneLength=10)
-
-model$bestTune
-
-plot(model)
-
-model
-
-tax <- as.data.frame(tax_table(PMS), stringsAsFactors=FALSE)
-model$coefnames <- c(tax$Phylum, model$coefnames[1082:1087])
-imp <- (varImp(model))
-imp <- imp$importance
-imp$names <- c(tax$Phylum, model$coefnames[1082:1087])
-ggplot(imp, aes(Overall, names))+
-    geom_point()
-
-summary(model$finalModel)
-
-# Make predictions
-predictions <- model %>% predict(test.df)
-predictions
-sqrt(mean((test.df$age_sampling - predictions)^2)) # RMSE
-cor(test.df$age_sampling, predictions) ^ 2 # R2
-names(test.df)
-
-
-### Individual repeatability
-
-samplecount <- data.frame(sample_data(PMS)) %>%
-    group_by(hyena_ID) %>%
-    summarise(NoSamples=n())
-sample_data(PMS)$Scount <- "single"
-sample_data(PMS)$Scount[sample_data(PMS)$hyena_ID%in%samplecount$hyena_ID[samplecount$NoSamples>1]] <- "rep"
-
-PMS.r <- subset_samples(PMS, Scount=="rep")
-PMS.r@sam_data$age_sampling
-PMS.r <- prune_taxa(taxa_sums(PMS.r)>0, PMS.r)
-PMS.r
-
-
-
-library(dplyr)
-
-PMS.r
-
-test <- PMS.r@sam_data %>%
-    group_by(hyena_ID) %>%
-    mutate(min_age=min(age_sampling),
-           n= n(),
-           max_age=max(age_sampling))
-
-all(test$Sample==PMS.r@sam_data$Sample)
-
-PMS.r@sam_data$TimeP <- 0
-PMS.r@sam_data$TimeP[test$age_sampling==test$min_age] <- 1
-PMS.r@sam_data$TimeP[test$age_sampling>test$min_age] <- 3
-PMS.r@sam_data$TimeP[test$age_sampling==test$max_age] <- 2
-
-### core analysis
-library(microbiome)
-taxa_names(PMS.r) <- paste("ASV", seq(1:length(taxa_names(PMS.r))), PMS.r@tax_table[,6], sep="_")
-
-Core<-microbiome::core(PMS.r, detection = 0, prevalence = 0.30)
-
-plot_core(Core,
-             plot.type = "lineplot") +
-    xlab("Relative Abundance (%)") +
-      theme_bw()
-
-library(viridis)
-
-plot_core(Core_asv,
-              plot.type = "heatmap")+
-        scale_fill_viridis()
-
-c
-# shannon diversity repeatability
-library(rptR)
-shannon <- vegan::diversity(PMS.r@otu_table, index = "shannon")  
-PMS.r@sam_data$shannon <- shannon
-metadf <- as.data.frame(PMS.r@sam_data)
-class(metadf) <- "data.frame"
-rpt(shannon~(1|hyena_ID), data=metadf, datatype = "Gaussian", nboot = 100, npermut = 100, grname="hyena_ID")
-# for core only
-shannon <- vegan::diversity(Core@otu_table, index = "shannon")  
-Core@sam_data$shannon <- shannon
-metadf <- as.data.frame(Core@sam_data)
-class(metadf) <- "data.frame"
-rpt(shannon~(1|hyena_ID), data=metadf, datatype = "Gaussian", nboot = 100, npermut = 100, grname="hyena_ID")
-
-
-PMS.r@sam_data$age_sampling
-
-install.packages("see")
-library(see)
-
-ggplot(data=Core@sam_data, aes(x=as.factor(TimeP), y=shannon))+
-    geom_point(size=2, alpha=0.5, fill="gray")+
-     geom_line(aes(group=hyena_ID), colour="gray")+
-    theme_bw(base_size=14)+
-    ylab("Shannon diversity")+
-    xlab("Sampling timepoint")+
-    theme(panel.grid.minor=element_blank(),
-          panel.background=element_blank(),axis.line=element_line(colour="black"))
- 
-
-
-ggplot(data=sample_data(PMS.r),aes(x=age_sampling,y=reorder(hyena_ID, age_sampling),group=hyena_ID))+
-    geom_line(size=0.5,alpha=0.5)+
-    geom_point(colour="black",pch=21,size=3, fill = "grey")+
-    geom_vline(xintercept=730, colour="firebrick", size=1, alpha=0.2)+
-    ylab("Hyena ID")+
-    xlab("Age at sampling")+
-    theme_bw(base_size=14)+
-    theme(panel.grid.minor=element_blank(),
-          panel.background=element_blank(),axis.line=element_line(colour="black"))+
-    theme(axis.text.y=element_blank(),
-                      axis.ticks.y=element_blank())
-
-
-Juv <- subset_samples(PMS.r, age_sampling<730)
-metadf <- as.data.frame(Juv@sam_data)
-class(metadf) <- "data.frame"
-rpt(shannon~(1|hyena_ID), data=metadf, datatype = "Gaussian", nboot = 100, npermut = 100, grname="hyena_ID")
-
-JCore<-microbiome::core(Juv, detection = 0, prevalence = 0.30)
-metadf <- as.data.frame(JCore@sam_data)
-class(metadf) <- "data.frame"
-rpt(shannon~(1|hyena_ID), data=metadf, datatype = "Gaussian", nboot = 100, npermut = 100, grname="hyena_ID")
-
-Juv
-
-asv_names<-taxa_names(scaled_core_asv)
-
-bray <- PMS.r
-
-jac <- vegdist(PMS.r@otu_table, method="jaccard")
-bray <- vegdist(PMS.r@otu_table, method="bray")
-
-permajac <- adonis2(jac~
-                    PMS.r@sam_data$CSocialRank_inputed+
-                    PMS.r@sam_data$age_sampling+
-                    PMS.r@sam_data$hyena_ID,
-                    by="margin")
-permajac
-permabray <- adonis2(bray~
-                    PMS.r@sam_data$CSocialRank_inputed+
-                    PMS.r@sam_data$age_sampling+
-                    PMS.r@sam_data$hyena_ID,
-                    by="margin")
-permabray
-
-# core
-jac <- vegdist(Core@otu_table, method="jaccard")
-bray <- vegdist(Core@otu_table, method="bray")
-
-permajac <- adonis2(jac~
-                    PMS.r@sam_data$CSocialRank_inputed+
-                    PMS.r@sam_data$age_sampling+
-                    PMS.r@sam_data$hyena_ID,
-                    by="margin")
-
-permabray <- adonis2(bray~
-                    PMS.r@sam_data$CSocialRank_inputed+
-                    PMS.r@sam_data$age_sampling+
-                    PMS.r@sam_data$hyena_ID,
-                    by="margin")
-
-permajac
-permabray
-
-otu <- otu_table(PMS.r)
-colnames(otu) <- as.vector(tax_table(PMS.r)[,"Genus"])
-mds <- vegan::metaMDS(otu)
-plot(mds)
-
-df <- PMS.r@sam_data
-class(df) <- "data.frame"
-cplot(mds)
-names(df)
-
-data.scores <- vegan::scores(mds)
-
-data.scores <- as.data.frame(data.scores$sites)
-
-all(rownames(data.scores)==PMS.r@sam_data$Sample)
-
-data.scores$hyena_ID <- PMS.r@sam_data$hyena_ID
-data.scores$age_sampling <- PMS.r@sam_data$age_sampling
-data.scores$age_sampling_cat <- PMS.r@sam_data$age_sampling_cat
-head(data.scores)
-
-ggplot(data.scores, aes(x=NMDS1, y=NMDS2, fill=age_sampling_cat))+
-    geom_point(size=3, shape=21)+
-    geom_line(aes(group=hyena_ID), colour="gray", alpha=0.8)+
-    scale_fill_manual(values=c("#a5c3ab", "#eac161"))+
-     theme_bw(base_size=14)+
-    theme(panel.grid.minor=element_blank(),
-          panel.background=element_blank(),axis.line=element_line(colour="black"))+
-    theme(axis.text.y=element_blank(),
-          axis.text.x=element_blank())
-
-
-(scores(mds))
-
+do_DataPrep <- FALSE
+
+if (do_DataPrep){## we want to add genetic mum and surrogate mum, in the future this
+    
+    ## will be done directly in MA. For now, we do it here
+    mytable <- read.csv("Data/Covariates_int_biomes_23-06-29.csv")
+    metadt <- sample_data(PMS)
+    mytable <- mytable[match(metadt$hyena_ID, mytable$hyena_ID),]
+    all(metadt$hyena_ID==mytable$hyena_ID) # looks good
+    names(mytable)
+    metadt$ID_sib <- mytable$ID_sib
+    metadt$genetic_mum <- mytable$genetic_mum
+    metadt$surrogate_mum <- mytable$surrogate_mum
+
+    ## now some more data cleanig and prep we have some NA's at the
+    ## social rank, for juveniles whose genetic mums were dead at hte
+    ## time of sampling. We will give them the social rank of their
+    ## surrogate mums
+    metadt[is.na(metadt$CSocialRank),]
+    ## B8423 and B8180 have 2 surrogate mums. Let's give them a mean
+    ## social rank.  B8427, B8738 and B8833 have 1 surrogate mum and
+    ## we will give them that social rank.
+    metadt[metadt$Sample%in%c("B8427", "B8738", "B8833"),
+           "CSocialRank"] <-
+        metadt[metadt$Sample%in%c("B8427", "B8738", "B8833"),
+               "social_rank_surrogate_mum1"]
+    metadt[metadt$Sample%in%c("B8423"),]$CSocialRank <-
+        mean(c(metadt[metadt$Sample%in%c("B8423"),]$social_rank_surrogate_mum1,
+               metadt[metadt$Sample%in%c("B8423"),]$social_rank_surrogate_mum2))
+    metadt[metadt$Sample%in%c("B8180"),]$CSocialRank <-
+        mean(c(metadt[metadt$Sample%in%c("B8180"),]$social_rank_surrogate_mum1,
+               metadt[metadt$Sample%in%c("B8180"),]$social_rank_surrogate_mum2))
+    
+    ## now let's see if we can complete immune and parasite data with
+    ## Susana's dataset
+    comp.I <- read.csv("Data/Sample_database_Soares_20230525.csv")
+    id_NA <- metadt[is.na(metadt$IgA),]$ hyena_ID
+    tb <- subset(comp.I, comp.I$ID%in%id_NA)
+    tb <- tb[1:19,]
+    tb[, c("ID", "sample_date", "frozen_sample", "formalin_sample")]
+    metadt[is.na(metadt$IgA),c("hyena_ID", "date_sampling")]
+    #B6493 instead of B6492 (one day later)
+    
+    metadt[metadt$Sample=="B6492",
+           c("Ancylostoma_egg_load",
+             "Cystoisospora_oocyst_load",
+             "Spirometra_egg_load",
+             "Dipylidium_egg_load",
+             "Trichuris_egg_load",
+             "Taeniidae_egg_load",
+             "Spirurida_egg_load",
+             "Mesocestoides_egg_load",
+             "mucin",
+             "IgA",
+             "IgG",
+             "lysozyme",
+             "neopterin")] <- unique(
+        tb[tb$formalin_sample=="B6493",
+           c("Ancylostoma_egg_load",
+             "Cystoisospora_oocyst_load",
+             "Spirometra_egg_load",
+             "Dipylidium_egg_load",
+             "Trichuris_egg_load",
+             "Taeniidae_egg_load",
+             "Spirurida_egg_load",
+             "Mesocestoides_egg_load",
+             "mucin",
+             "IgA",
+             "IgG",
+             "lysozyme",
+             "neopterin")])
+
+#ES2736 instead of B9482 (8 days later)
+    metadt[metadt$Sample=="B9482",
+           c("Ancylostoma_egg_load",
+             "Cystoisospora_oocyst_load",
+             "Spirometra_egg_load",
+             "Dipylidium_egg_load",
+             "Trichuris_egg_load",
+             "Taeniidae_egg_load",
+             "Spirurida_egg_load",
+             "Mesocestoides_egg_load",
+             "mucin",
+             "IgA",
+             "IgG",
+             "lysozyme",
+             "neopterin")] <- tb[tb$frozen_sample=="ES2736",
+                                 c("Ancylostoma_egg_load",
+                                   "Cystoisospora_oocyst_load",
+                                   "Spirometra_egg_load",
+                                   "Dipylidium_egg_load",
+                                   "Trichuris_egg_load",
+                                   "Taeniidae_egg_load",
+                                   "Spirurida_egg_load",
+                                   "Mesocestoides_egg_load", "mucin",
+                                   "IgA", "IgG", "lysozyme",
+                                   "neopterin")]
+#ES887 instead of X6643 (one day later)
+    metadt[metadt$Sample=="X6643",
+           c("Ancylostoma_egg_load",
+             "Cystoisospora_oocyst_load",
+             "Spirometra_egg_load",
+             "Dipylidium_egg_load",
+             "Trichuris_egg_load",
+             "Taeniidae_egg_load",
+             "Spirurida_egg_load",
+             "Mesocestoides_egg_load",
+             "mucin",
+             "IgA",
+             "IgG",
+             "lysozyme",
+             "neopterin")] <- tb[tb$frozen_sample=="ES887",
+                                 c("Ancylostoma_egg_load",
+                                   "Cystoisospora_oocyst_load",
+                                   "Spirometra_egg_load",
+                                   "Dipylidium_egg_load",
+                                   "Trichuris_egg_load",
+                                   "Taeniidae_egg_load",
+                                   "Spirurida_egg_load",
+                                   "Mesocestoides_egg_load",
+                                   "mucin",
+                                   "IgA",
+                                   "IgG",
+                                   "lysozyme",
+                                   "neopterin")]
+    
+    sample_data(PMS)$AFR[sample_data(PMS)$Survival_Ad=="No"] # this makes sense
+    PMS@ sam_data <- metadt
+    
+    #let's input what we can
+    library(mice)
+    pMiss <- function(x){sum(is.na(x))/length(x)*100}
+    apply(PMS@sam_data,2,pMiss)
+    
+    # to input: mucin
+    df <- data.frame(Sample=PMS@sam_data$Sample, mucin=PMS@sam_data$mucin)
+    Mucin <- mice(df, m=5, maxit=50, meth="pmm", seed=500)
+    Mucin <- complete(Mucin, 1)
+    PMS@sam_data$mucin_inputed<- Mucin$mucin
+    
+    # to input: IgA
+    df <- data.frame(Sample=PMS@sam_data$Sample, IgA=PMS@sam_data$IgA)
+    IGA <- mice(df, m=5, maxit=50, meth="pmm", seed=500)
+    IGA <- complete(IGA, 1)
+    PMS@sam_data$IgA_inputed<- IGA$IgA
+
+    # to input: IgG
+    df <- data.frame(Sample=PMS@sam_data$Sample, IgG=PMS@sam_data$IgG)
+    IGG <- mice(df, m=5, maxit=50, meth="pmm", seed=500)
+    IGG <- complete(IGG, 1)
+    PMS@sam_data$IgG_inputed<- IGG$IgG
+    
+    #defining Clan
+    PMS@sam_data$Clan <- substr(PMS@sam_data$hyena_ID, 1,1)
+    saveRDS(PMS, "tmp/PMS_imputed.rds")
+} else
+    PMS <- readRDS("tmp/PMS_imputed.rds")
+
+# let's see which parasites we've got
+Apicomplexa <- subset_taxa(PMS, Phylum%in%"Apicomplexa")
+Nematodes <- subset_taxa(PMS, Phylum%in%"Nematozoa")
+Helminthes <- subset_taxa(PMS, Phylum%in%"Platyhelminthes")
+
+get_taxa_unique(Apicomplexa, "Genus")
+get_taxa_unique(Nematodes, "Genus")
+get_taxa_unique(Helminthes, "Genus")
+
+#Cysto <- subset_taxa(PMS, Genus%in%c("Eimeriorina", "Toxoplasma", "Eimeria", "Cystoisospora"))
+#Cysto <- subset_taxa(PMS, Genus%in%c("Eimeriorina", "Eimeria", "Sarcocystis"))
+Cysto <- subset_taxa(PMS, Genus%in%c("Sarcocystis"))
+Spiru <- subset_taxa(PMS, Genus%in%c("Spirurida"))
+Ancy <- subset_taxa(PMS, Genus%in%c("Rhabditida"))
+Diphylo <- subset_taxa(PMS, Genus%in%"Diphyllobothriidea")
+Dipy <- subset_taxa(PMS, Genus%in%"Cyclophyllidea")
+
+# let's see the correlation with egg counts
+Cysto.df <-
+    na.omit(data.frame(Cyso_ASV=sample_sums(tax_glom(Cysto, "Genus")),
+                       Cysto_OPG=Cysto@sam_data$
+                           Cystoisospora_oocyst_load))
+
+#na.omit(data.frame(Cyso_ASV=sample_sums(tax_glom(Cysto, "Genus")),
+#                   Cysto_OPG=Cysto@sam_data$Cystoisospora_oocyst_load))
+
+#na.omit(data.frame(Cyso_ASV=sample_sums(tax_glom(Cysto, "Genus")),
+#                   Cysto_OPG=Cysto@sam_data$Cystoisospora_oocyst_load))
+
+#na.omitA(data.frame(Cyso_ASV=sample_sums(tax_glom(Cysto, "Genus")),
+#                    Cysto_OPG=Cysto@sam_data$Cystoisospora_oocyst_load))
+
+#na.omit(data.frame(Cyso_ASV=sample_sums(tax_glom(Cysto, "Genus")),
+#                   Cysto_OPG=Cysto@sam_data$Cystoisospora_oocyst_load))
+
+Spiru.df <- na.omit(data.frame(ASV=sample_sums(tax_glom(Spiru, "Genus")),
+                               OPG=Spiru@sam_data$Spirurida_egg_load))
+
+#na.omit(data.frame(ASV=sample_sums(tax_glom(Spiru, "Genus")),
+#                   OPG=Spiru@sam_data$Spirurida_egg_load))
+
+Ancy.df <- na.omit(data.frame(ASV=sample_sums(tax_glom(Ancy, "Genus")),
+                              OPG=Spiru@sam_data$Ancylostoma_egg_load))
+#na.omit(data.frame(ASV=sample_sums(tax_glom(Ancy, "Genus")),
+#                   OPG=Spiru@sam_data$Ancylostoma_egg_load))
+
+Diphylo.df <-na.omit(data.frame(ASV=sample_sums(tax_glom(Diphylo, "Genus")),
+                                OPG=Spiru@sam_data$Spirometra_egg_load))
+#na.omit(data.frame(ASV=sample_sums(tax_glom(Diphylo, "Genus")),
+#                   OPG=Spiru@sam_data$Spirometra_egg_load))
+
+Dipy.df <- na.omit(data.frame(ASV=sample_sums(tax_glom(Dipy, "Genus")),
+                              OPG=Dipy@sam_data$Dipylidium_egg_load,
+                              OPG_Q=Dipy@sam_data$Dipylidium_rich..includes.proglotids.visualization.info.))
+#na.omit(data.frame(ASV=sample_sums(tax_glom(Dipy, "Genus")),
+#                   OPG=Dipy@sam_data$Dipylidium_egg_load,
+#                   OPG_Q=Dipy@sam_data$Dipylidium_rich..includes.proglotids.visualization.info.))
+
+# Dipylidium is unreliable in egg counts. Let's just see which method is more sensitve
+Dipy.df$ASV_Q <- 3
+Dipy.df$ASV_Q[Dipy.df$ASV>0] <- 1
+Dipy.df$ASV_Q[Dipy.df$ASV==0] <- 0
+table(Dipy.df$ASV_Q, Dipy.df$OPG_Q)
+# now the correlations
+cor.test(Dipy.df$ASV, Dipy.df$OPG)
+cor.test(Cysto.df$Cyso_ASV, Cysto.df$Cysto_OPG)
+cor.test(Spiru.df$ASV, Spiru.df$OPG)
+cor.test(Ancy.df$ASV, Ancy.df$OPG)
+cor.test(Diphylo.df$ASV, Diphylo.df$OPG)
+
+#ggplot(Diphylo.df, aes(x=ASV, y=OPG))+
+#    geom_point()
+
+
+# We consider parasites of the gastrointestinal tract of hyenas:
+Parasite <- subset_taxa(PMS, Genus%in%c("Sarcocystis", "Spirurida", "Rhabditida", "Diphyllobothriidea", "Cyclophyllidea", "Cystoisospora", "Cryptosporidium", "Ascaridida"))
+
+##  only bacteria
+Bacteria <- subset_taxa(PMS, Kingdom %in%"Bacteria") 
+Bacteria
+
+# only fungi
+Fungi <- subset_taxa(PMS, Phylum %in% c("Mucoromycota", "Ascomycota", "Basidiomycota", "Blastocladiomycota", "Chytridiomycota", "Neocallimastigomycota"))
+
+# and merge per genus
+Parasite2 <- tax_glom(Parasite, "Genus")
+Parasite2
+
+#############################################################################
 ############# let's do dyad comparisons now
-sample_data(PMS)$key <- paste(sample_data(PMS)$hyena_ID, sample_data(PMS)$Sample, sep="_")
+sample_data(PMS)$key <- paste(sample_data(PMS)$hyena_ID,
+                              sample_data(PMS)$Sample, sep="_")
 key <- data.frame(ID=sample_data(PMS)$key)
 metadt <- sample_data(PMS)
+
 # renaming this now
 sample_names(PMS) <- key$ID
 
 ####################
 ## 1) Jaccard distance
-JACM <- as.matrix(phyloseq::distance(PMS, method="jaccard", type="samples"))
+JACM <- as.matrix(phyloseq::distance(PMS,
+                                     method="jaccard",
+                                     type="samples",
+                                     binary=T))
 # transpose Jaccard disssimilary matrix to Jaccard similarty matrix
 JACM <- 1-JACM
-# sanity check
-all(rownames(JACM)==key)
-dimnames(JACM)<- c(key, key)
+jac<-c(as.dist(JACM))
 
-## 2) Chisq distance
-CHIM <- as.matrix(vegan::vegdist(PMS@otu_table, method="chisq"))
-# transpose Jaccard disssimilary matrix to Jaccard similarty matrix
-CHIM <- 1-CHIM
-# sanity check
-all(rownames(CHIM)==key)
-dimnames(CHIM)<- c(key, key)
+## 2) Aitchison distance
+AITM <- as.matrix(vegan::vegdist(PMS@otu_table,
+                                 method="aitchison",
+                                 pseudocount=1))
+AITM <- 1-AITM
+ait<-c(as.dist(AITM))
 
-## 3) Bray distance
-BRAYM <- as.matrix(phyloseq::distance(PMS, method="bray", type="samples"))
-# transpose Jaccard disssimilary matrix to Jaccard similarty matrix
-BRAYM <- 1-BRAYM
-# sanity check
-all(rownames(BRAYM)==key)
-dimnames(BRAYM)<- c(key, key)
+## 3) Jaccard distance Parasites
+JACP <- as.matrix(phyloseq::distance(Parasite,
+                                     method="jaccard",
+                                     type="samples",
+                                     binary=T))
+JACP[is.na(JACP)]<- 0 # defining those as 0 distances
+JACP <- 1-JACP
+jacP<-c(as.dist(JACP))
 
-## 4) Sex pairs
+## 4) Aitchison distance Parasites
+AITP <- as.matrix(vegan::vegdist(Parasite@otu_table,
+                                 method="aitchison",
+                                 pseudocount=1))
+AITP[is.na(AITP)]<- 0 # defining those as 0 distances
+AITP <- 1-AITP
+aitP<-c(as.dist(AITP))
+
+## 5) Jaccard distance Bacteria
+JACB <- as.matrix(phyloseq::distance(Bacteria,
+                                     method="jaccard",
+                                     type="samples",
+                                     binary=T))
+JACB[is.na(JACB)]<- 0 # defining those as 0 distances
+JACB <- 1-JACB
+jacB<-c(as.dist(JACB))
+
+## 6) Aitchison distance Bacteria
+AITB <- as.matrix(vegan::vegdist(Bacteria@otu_table,
+                                 method="aitchison",
+                                 pseudocount=1))
+AITB[is.na(AITB)]<- 0 # defining those as 0 distances
+AITB <- 1-AITB
+aitB<-c(as.dist(AITB))
+
+## 7) Jaccard distance Fungi
+JACF <- as.matrix(phyloseq::distance(Fungi,
+                                     method="jaccard",
+                                     type="samples",
+                                     binary=T))
+JACF[is.na(JACF)]<- 0 # defining those as 0 distances
+JACF <- 1-JACF
+jacF<-c(as.dist(JACF))
+
+## 8) Aitchison distance Fungi
+AITF <- as.matrix(vegan::vegdist(Fungi@otu_table,
+                                 method="aitchison",
+                                 pseudocount=1))
+AITF[is.na(AITF)]<- 0 # defining those as 0 distances
+AITF <- 1-AITF
+aitF<-c(as.dist(AITF))
+
+## 9) Sex pairs
 Sex_frame<-metadt[,c("key","sex")]
 Sex_frame$key<-as.character(Sex_frame$key)
 Sex_frame$sex<-as.character(Sex_frame$sex)
@@ -454,102 +356,764 @@ for(i in 1:nrow(Sex_frame)){
             SEXM[i,j]= "FM"}
     }
 }
-dimnames(SEXM)<-c(key, key)
-
-# 5) Making age distances
-#Create data frame with each sample name (character) and sampling time (numeric)
-AGE_frame<-metadt[,c("key", "age_sampling")]
-#Create an empty matrix to fill with distances
-AGEM<-array(0,c(nrow(AGE_frame),nrow(AGE_frame)))
-#Derive matrix with time distances between each sample using abs()-function
-for (i in 1:nrow(AGE_frame)){
-    for (j in 1:nrow(AGE_frame))
-    {AGEM[i,j]=abs(AGE_frame$age_sampling[i] -AGE_frame$age_sampling[j])
-    }
-}
-dimnames(AGEM) <- c(key, key)
-
-
-# 6) Making rank distances
-RANK_frame<-metadt[,c("key", "CSocialRank_inputed")]
-RANKM<-array(0,c(nrow(RANK_frame),nrow(RANK_frame)))
-for (i in 1:nrow(RANK_frame)){
-    for (j in 1:nrow(RANK_frame))
-    {RANKM[i,j]=abs(RANK_frame$CSocialRank_inputed[i] -RANK_frame$CSocialRank_inputed[j])
-    }
-}
-dimnames(RANKM) <- c(key, key)
-
-# 7) Making IgA distances
-IgA_frame<-metadt[,c("key", "IgA_inputed")]
-IGAM<-array(0,c(nrow(IgA_frame),nrow(IgA_frame)))
-for (i in 1:nrow(IgA_frame)){
-    for (j in 1:nrow(IgA_frame))
-    {IGAM[i,j]=abs(IgA_frame$IgA_inputed[i] -IgA_frame$IgA_inputed[j])
-    }
-}
-dimnames(IGAM) <- c(key, key)
-
-# 8) Making IgA distances
-Mucin_frame<-metadt[,c("key", "mucin_inputed")]
-MUCM<-array(0,c(nrow(Mucin_frame),nrow(Mucin_frame)))
-for (i in 1:nrow(Mucin_frame)){
-    for (j in 1:nrow(Mucin_frame))
-    {MUCM[i,j]=abs(Mucin_frame$mucin_inputed[i] -Mucin_frame$mucin_inputed[j])
-    }
-}
-dimnames(MUCM) <- c(key, key)
-
-chi<-c(as.dist(CHIM))
-bray <- c(as.dist(BRAYM))
-jac<-c(as.dist(JACM))
-age<-c(as.dist(AGEM))
 sex<-c(SEXM[lower.tri(SEXM)])
-iga<-c(as.dist(IGAM))
-muc<-c(as.dist(MUCM))
-rank <- c(as.dist(RANKM))
+
+# shared clan
+ClanM<-array(0,c(nrow(metadt),nrow(metadt)))
+for(i in 1:nrow(metadt)){
+    for(j in 1:nrow(metadt)){
+        if(metadt$Clan[i]==metadt$Clan[j]){
+            ClanM[i,j]= "1"
+        } else{
+            ClanM[i,j]= "0"
+        }
+    }
+}
+
+ClanM<-c(ClanM[lower.tri(ClanM)])  
+
+## now other distances
+AGEM <- c(dist(metadt[,c("age_sampling")]))
+
+metadt$date_sampling <- as.Date(metadt$date_sampling,
+                                format='%m/%d/%Y')
+SamplingM <- c(dist(metadt$date_sampling))
+RANKM<-c(dist(metadt[,c("CSocialRank")]))
+IGAM<-c(dist(metadt[,c("IgA_inputed")]))
+MUCM<-c(dist(metadt[,c("mucin_inputed")]))
+
+# genetic mum
+MUM_frame<-metadt[,c("key","genetic_mum")]
+MUMM<-array(0,c(nrow(MUM_frame),nrow(MUM_frame)))
+for(i in 1:nrow(MUM_frame)){
+    for(j in 1:nrow(MUM_frame)){
+        if(MUM_frame$genetic_mum[i]==MUM_frame$genetic_mum[j]){
+            MUMM[i,j]= "1"
+        } else{
+            MUMM[i,j]= "0"
+        }
+    }
+}
+MUMM <- as.character(c(as.dist(MUMM)))
 
 #Combine these vectors into a data frame
-data.dyad<-data.frame(Microbiomejac=jac,Microbiomechi=chi, Microbiomebray=bray, Age=age, Sex=sex, IgA=iga, Mucin=muc, Rank=rank)
+data.dyad<-data.frame(MS_J=jac,
+                      MS_A=ait,
+                      Parasite_J=jacP,
+                      Parasite_A=aitP,
+                      Bacteria_J=jacB,
+                      Bacteria_A=aitB,
+                      Fungi_J=jacF,
+                      Fungi_A=aitF,
+                      Age=AGEM,
+                      Sex=sex,
+                      IgA=IGAM,
+                      Mucin=MUCM,
+                      Rank=RANKM,
+                      Gen_mum=MUMM,
+                      Temporal=SamplingM,
+                      Clan=ClanM)
 
 list<-expand.grid(key$ID, key$ID)
 
 # This created individual-to-same-individual pairs as well. Get rid of these:
 list<-list[which(list$Var1!=list$Var2),]
-
 # this still has both quantiles in--> add 'unique' key
 list$key <- apply(list, 1, function(x)paste(sort(x), collapse=''))
 list<-subset(list, !duplicated(list$key))
-
 # sanity check that the Individual name combinations are in the same exact order as the lower quantile value vector of the matrices
 i=nrow(key)
 JACM[which(rownames(JACM)==list$Var1[i]),which(colnames(JACM)==list$Var2[i])]==jac[i]
-
 # add the names of both individuals participating in each dyad into the data frame
-data.dyad$IDA<-list$Var2
-data.dyad$IDB<-list$Var1
+data.dyad$IDA_s<-list$Var2
+data.dyad$IDB_s<-list$Var1
+
+data.dyad$IDA <- gsub("_.*", "", data.dyad$IDA_s)
+data.dyad$IDB <- gsub("_.*", "", data.dyad$IDB_s)
+
 # Make sure you have got rid of all self comparisons
 data.dyad<-data.dyad[which(data.dyad$IDA!=data.dyad$IDB),]
 
 ######################### Now we model the data ####################
 #scale all predictors to range between 0-1 if they are not already naturally on that scale
 #define scaling function:
-range.use <- function(x,min.use,max.use){ (x - min(x,na.rm=T))/(max(x,na.rm=T)-min(x,na.rm=T)) * (max.use - min.use) + min.use }
-scalecols<-c("Rank","Age", "IgA", "Mucine")
+range.use <- function(x, min.use, max.use){ (x - min(x,na.rm=T))/(max(x,na.rm=T)-min(x,na.rm=T)) * (max.use - min.use) + min.use }
+scalecols<-c("Rank",
+             "Age",
+             "IgA",
+             "Mucin",
+             "Parasite_A",
+             "Bacteria_A",
+             "Parasite_A",
+             "Fungi_A",
+             "MS_A",
+             "MS_J",
+             "Temporal")
 for(i in 1:ncol(data.dyad[,which(colnames(data.dyad)%in%scalecols)])){
-    data.dyad[,which(colnames(data.dyad)%in%scalecols)][,i]<-range.use(data.dyad[,which(colnames(data.dyad)%in%scalecols)][,i],0,1)
+    data.dyad[,which(colnames(data.dyad)%in%scalecols)][,i]<-
+        range.use(data.dyad[,which(colnames(data.dyad)%in%scalecols)][,i],0,1)
     }
 
 
 library(brms)
 
-#### model
-modelJ<-brm(Microbiomejac~1+ Age+Sex+IgA+Mucin+Rank+
-                (1|mm(IDA,IDB)),
-                data = data.dyad,
-                family= "gaussian",
-                warmup = 1000, iter = 3000,
-                cores = 20, chains = 4,
-                inits=0)
+### Multivariate model for Parasite, Fungi and Bacteria
+#bformJ <- bf(mvbind(Fungi_J, Parasite_J, Bacteria_J)~1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
+#                Temporal+ Clan+Age:IgA+Age:Mucin+
+#                (1|mm(IDA,IDB)))+ set_rescor(TRUE)  
+#fitJ <- brm(bformJ, data = data.dyad,
+#            family= "gaussian",
+#            warmup = 1000, iter = 3000,
+#            cores = 20, chains = 4,
+#            inits=0)
+#saveRDS(fitJ, "tmp/modelJ_FPB.rds")
+#
+#bformA <- bf(mvbind(Fungi_A, Parasite_A, Bacteria_A)~1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
+#                Temporal+ Clan+Age:IgA+Age:Mucin+
+#                (1|mm(IDA,IDB)))+ set_rescor(TRUE)  
+#fitA <- brm(bformA, data = data.dyad,
+#            family= "gaussian",
+#            warmup = 1000, iter = 3000,
+#            cores = 20, chains = 4,
+#            inits=0)
+#saveRDS(fitA, "tmp/modelA_FPB.rds")
 
-modelJ
+#### model
+#modelJ<-brm(MS_J~ 1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
+#                Temporal+ Clan+Age:IgA+Age:Mucin+
+#                (1|mm(IDA,IDB)),
+#            data = data.dyad,
+#            family= "gaussian",
+#            warmup = 1000, iter = 3000,
+#            cores = 20, chains = 4,
+#            inits=0)
+#saveRDS(modelJ, "tmp/modelJ.rds")
+#
+#modelA<-brm(MS_A~1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
+#                Temporal+ Clan+Age:IgA+Age:Mucin+
+#                (1|mm(IDA,IDB)),
+#                data = data.dyad,
+#                family= "gaussian",
+#                warmup = 1000, iter = 3000,
+#                cores = 20, chains = 4,
+#                inits=0)
+#saveRDS(modelA, "tmp/modelA.rds")
+#modelA <- readRDS("tmp/modelA.rds")
+
+#### individual models for plotting
+#modelJ<-brm(MS_J~ 1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
+#                Temporal+ Clan+Age:IgA+Age:Mucin+
+#                (1|mm(IDA,IDB)),
+#            data = data.dyad,
+#            family= "gaussian",
+#            warmup = 1000, iter = 3000,
+#            cores = 20, chains = 4,
+#            inits=0)
+#saveRDS(modelJ, "tmp/modelJ.rds")
+#
+#modelA<-brm(MS_A~1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
+#                Temporal+ Clan+Age:IgA+Age:Mucin+
+#                (1|mm(IDA,IDB)),
+#                data = data.dyad,
+#                family= "gaussian",
+#                warmup = 1000, iter = 3000,
+#                cores = 20, chains = 4,
+#                inits=0)
+#saveRDS(modelA, "tmp/modelA.rds")
+#modelA <- readRDS("tmp/modelA.rds")
+#
+#modelFJ <- brm(Fungi_J~1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
+#                Temporal+ Clan +Age:IgA+Age:Mucin+
+#                (1|mm(IDA,IDB)),
+#                data = data.dyad,
+#                family= "gaussian",
+#                warmup = 1000, iter = 3000,
+#                cores = 20, chains = 4,
+#                inits=0)
+#saveRDS(modelFJ, "tmp/modelFJ.rds")
+#
+#modelFA <- brm(Fungi_A ~1 + IgA+ Mucin + Age+  Rank+ Gen_mum+
+#               Temporal+ Clan+ Age:IgA+Age:Mucin+
+#                (1|mm(IDA,IDB)),
+#                data = data.dyad,
+#                family= "gaussian",
+#                warmup = 1000, iter = 3000,
+#                cores = 20, chains = 4,
+#                inits=0)
+#saveRDS(modelFA, "tmp/modelFA.rds")
+#
+#modelBJ <- brm(Bacteria_J~1+IgA+ Mucin + Age+  Rank+ Gen_mum+
+#                   Temporal+ Clan+Age:IgA+Age:Mucin+
+#                (1|mm(IDA,IDB)),
+#                data = data.dyad,
+#                family= "gaussian",
+#                warmup = 1000, iter = 3000,
+#                cores = 20, chains = 4,
+#                inits=0)
+#saveRDS(modelBJ, "tmp/modelBJ.rds")
+#
+#modelBA <- brm(Bacteria_A~1+IgA+ Mucin + Age+  Rank+ Gen_mum+
+#                Temporal+ Clan +Age:IgA+Age:Mucin+
+#                (1|mm(IDA,IDB)),
+#                data = data.dyad,
+#                family= "gaussian",
+#                warmup = 1000, iter = 3000,
+#                cores = 20, chains = 4,
+#                inits=0)
+#saveRDS(modelBA, "tmp/modelBA.rds")
+#
+#modelPJ <- brm(Parasite_J~1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
+#                Temporal+ Clan +Age:IgA+Age:Mucin+
+#                (1|mm(IDA,IDB)),
+#                data = data.dyad,
+#                family= "gaussian",
+#                warmup = 1000, iter = 3000,
+#                cores = 20, chains = 4,
+#                inits=0)
+#saveRDS(modelPJ, "tmp/modelPJ.rds")
+#
+#modelPA <- brm(Parasite_A ~1 + IgA+ Mucin + Age+  Rank+ Gen_mum+
+#               Temporal+ Clan+ Age:IgA+Age:Mucin+
+#                (1|mm(IDA,IDB)),
+#                data = data.dyad,
+#                family= "gaussian",
+#                warmup = 1000, iter = 3000,
+#                cores = 20, chains = 4,
+#                inits=0)
+#saveRDS(modelPA, "tmp/modelPA.rds")
+#
+#model_intJ <- brm(Parasite_J~ Bacteria_J+Fungi_J+
+#                (1|mm(IDA,IDB)),
+#                data = data.dyad,
+#                family= "gaussian",
+#                warmup = 1000, iter = 3000,
+#                cores = 20, chains = 4,
+#                inits=0)
+#saveRDS(model_intJ, "tmp/model_intJ.rds")
+#
+#model_intA <- brm(Parasite_A~ Bacteria_A+Fungi_A+
+#                (1|mm(IDA,IDB)),
+#                data = data.dyad,
+#                family= "gaussian",
+#                warmup = 1000, iter = 3000,
+#                cores = 20, chains = 4,
+#                inits=0)
+#saveRDS(model_intA, "tmp/model_intA.rds")
+#
+
+modelJ_FPB <- readRDS("tmp/modelJ_FPB.rds")
+modelA_FPB <- readRDS("tmp/modelA_FPB.rds")
+
+modelA <- readRDS("tmp/modelA.rds")
+modelJ <- readRDS("tmp/modelJ.rds")
+
+model_intJ <- readRDS("tmp/model_intJ.rds")
+model_intA <- readRDS("tmp/model_intA.rds")
+modelFA <- readRDS("tmp/modelFA.rds")
+modelFJ <- readRDS("tmp/modelFJ.rds")
+modelBJ <- readRDS("tmp/modelBJ.rds")
+modelBA <- readRDS("tmp/modelBA.rds")
+modelPJ <- readRDS("tmp/modelPJ.rds")
+modelPA <- readRDS("tmp/modelPA.rds")
+
+print(summary(modelFJ), digits=3)
+print(summary(modelPJ), digits=3)
+print(summary(modelBJ), digits=3)
+print(summary(modelJ), digits=3)
+
+print(summary(modelPA), digits=3)
+print(summary(modelFA), digits=3)
+print(summary(modelBA), digits=3)
+print(summary(modelA), digits=3)
+
+print(summary(modelJ_FPB), digits=3)
+print(summary(modelA_FPB), digits=3)
+
+### testing increases of variance with IgA
+summary(metadt$IgA_inputed)
+metadt$IgA_g <- "med"
+metadt$IgA_g[metadt$IgA_inputed>quantile(metadt$IgA_inputed, probs=0.75)] <- "high"
+metadt$IgA_g[metadt$IgA_inputed<quantile(metadt$IgA_inputed, probs=0.25)] <- "low"
+
+### testing increases of variance with mucin
+metadt$mucin_g <- "med"
+metadt$mucin_g[metadt$mucin_inputed>quantile(metadt$mucin_inputed, probs=0.75)] <- "high"
+metadt$mucin_g[metadt$mucin_inputed<quantile(metadt$mucin_inputed, probs=0.25)] <- "low"
+
+
+
+PJ <- phyloseq::distance(Parasite,method="jaccard",
+                                     type="samples",
+                                     binary=T)
+PJ[is.na(PJ)]<- 0 # defining those as 0 distances
+
+PJ_dis <- betadisper(PJ, metadt$IgA_g)
+TukeyHSD(PJ_dis)
+
+metadt$PJ_dis <- PJ_dis$distances
+metadt$IgA_g <- factor(metadt$IgA_g, levels=c("low", "med", "high"))
+
+adonis2(PJ~metadt$IgA_g+
+          metadt$mucin_g,
+      by="margin")
+
+
+adonis2(PJ~metadt$IgA_inputed+
+            metadt$mucin_inputed,
+      by="margin")
+
+otu <- (Parasite@otu_table)
+
+colnames(otu) <- paste("ASV", seq(1:ncol(otu)), Parasite@tax_table[,6], sep="_")
+
+dt <- cbind(otu, metadt)
+
+paste(colnames(otu), collapse=" ,")
+
+library(brms)
+
+bformP <- bf(mvbind(ASV_1_Sarcocystis ,ASV_2_Cystoisospora ,ASV_3_Cystoisospora ,ASV_4_Cryptosporidium ,ASV_5_Rhabditida ,ASV_6_Rhabditida ,ASV_7_Rhabditida ,ASV_8_Rhabditida ,ASV_9_Rhabditida ,ASV_10_Ascaridida ,ASV_11_Spirurida ,ASV_12_Spirurida ,ASV_13_Spirurida ,ASV_14_Cystoisospora ,ASV_15_Cystoisospora ,ASV_16_Cryptosporidium ,ASV_17_Cryptosporidium ,ASV_18_Diphyllobothriidea ,ASV_19_Cyclophyllidea ,ASV_20_Cryptosporidium ,ASV_21_Cyclophyllidea ,ASV_22_Rhabditida ,ASV_23_Sarcocystis ,ASV_24_Sarcocystis ,ASV_25_Sarcocystis)~1+IgA_inputed+mucin_inputed)+set_rescor(TRUE)
+
+fit <- brm(bformP, data=dt,
+           family= "gaussian",
+            warmup = 1000, iter = 3000,
+            cores = 20, chains = 4,
+            inits=0)
+
+#bformJ <- bf(mvbind(Fungi_J, Parasite_J, Bacteria_J)~1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
+#                Temporal+ Clan+Age:IgA+Age:Mucin+
+#                (1|mm(IDA,IDB)))+ set_rescor(TRUE)  
+#fitJ <- brm(bformJ, data = data.dyad,
+#            family= "gaussian",
+#            warmup = 1000, iter = 3000,
+#            cores = 20, chains = 4,
+#            inits=0)
+#saveRDS(fitJ, "tmp/modelJ_FPB.rds")
+
+colnames(metadt)
+
+#model_intA <- brm(Parasite_A~ Bacteria_A+Fungi_A+
+#                (1|mm(IDA,IDB)),
+#                data = data.dyad,
+#                family= "gaussian",
+#                warmup = 1000, iter = 3000,
+#                cores = 20, chains = 4,
+#                inits=0)
+#saveRDS(model_intA, "tmp/model_intA.rds")
+
+
+
+PJ_centroid <- ggplot(metadt, aes(x=IgA_g, y=PJ_dis))+
+        geom_boxplot(outlier.shape = NA)+
+    geom_point(aes(fill=IgA_g), colour="black",pch=21,size=3, alpha=0.4)+
+    scale_fill_manual(values=c("#f1c40f", "#f39c12", "#ba4a00"))+
+    labs(x="f-IgA levels", y="Parasite composition variation (distance to centroid)")+
+theme_classic()+
+    theme(legend.position="none")
+
+PJ_MUC <- betadisper(PJ, metadtmucin_g)
+TukeyHSD(PJ_MUC)
+
+metadt$PJ_MUC <- PJ_MUC$distances
+metadt$mucin_g <- factor(metadt$mucin_g, levels=c("low", "med", "high"))
+
+PJ_Mcentroid <- ggplot(metadt, aes(x=mucin_g, y=PJ_MUC))+
+        geom_boxplot(outlier.shape = NA)+
+    geom_point(aes(fill=mucin_g), colour="black",pch=21,size=3, alpha=0.4)+
+    scale_fill_manual(values=c("#f1c40f", "#f39c12", "#ba4a00"))+
+    labs(x="f-mucin levels", y="Parasite composition variation (distance to centroid)")+
+theme_classic()+
+    theme(legend.position="none")
+
+
+plot_grid(PJ_centroid, PJ_Mcentroid)
+
+plot_grid(IgA, PJ_centroid, Mucin, PJ_Mcentroid)
+
+FA <- vegan::vegdist(Fungi@otu_table,
+                                 method="aitchison",
+                                 pseudocount=1)
+FA[is.na(FA)]<- 0 # defining those as 0 distances
+
+FA_d <- betadisper(FA, metadt$IgA_g)
+TukeyHSD(betadisper(FA, metadt$IgA_g))
+
+metadt$FA_dis <- FA_d$distances
+
+FA_centroid <- ggplot(metadt, aes(x=IgA_g, y=FA_dis))+
+        geom_boxplot(outlier.shape = NA)+
+    geom_point(aes(fill=IgA_g), colour="black",pch=21,size=3, alpha=0.4)+
+    scale_fill_manual(values=c("#f1c40f", "#f39c12", "#ba4a00"))+
+    labs(x="f-IgA levels", y="Fungi composition variaton (distance to centroid)")+
+theme_classic()+
+    theme(legend.position="none")
+
+centroid <- plot_grid(PJ_centroid, FA_centroid, labels="auto", nrow=1)
+
+
+#ggplot2::ggsave(file="Figures/Figure2.pdf", Parasite_immune, width = 190, height = 140, dpi = 300, units="mm")
+
+
+## plotting
+resdf.fun<- function(modelJ, name){
+    para <- summary(modelJ)$fixed
+    data.frame(Domain=name,
+               IgA_Estimate=para[rownames(para)=="IgA", "Estimate"],
+               IgA_lCI=para[rownames(para)=="IgA", "l-95% CI"],
+               IgA_uCI=para[rownames(para)=="IgA", "u-95% CI"],
+               Mucin_Estimate=para[rownames(para)=="Mucin", "Estimate"],
+               Mucin_lCI=para[rownames(para)=="Mucin", "l-95% CI"],
+               Mucin_uCI=para[rownames(para)=="Mucin", "u-95% CI"],
+               Age_Estimate=para$Estimate[rownames(para)=="Age"],
+               Age_lCI=para[rownames(para)=="Age", "l-95% CI"],
+               Age_uCI=para[rownames(para)=="Age", "u-95% CI"],
+               Rank_Estimate=para$Estimate[rownames(para)=="Rank"],
+               Rank_lCI=para[rownames(para)=="Rank", "l-95% CI"],
+               Rank_uCI=para[rownames(para)=="Rank", "u-95% CI"],
+               Gen_mum1_Estimate=para$Estimate[rownames(para)=="Gen_mum1"],
+               Gen_mum1_lCI=para[rownames(para)=="Gen_mum1", "l-95% CI"],
+               Gen_mum1_uCI=para[rownames(para)=="Gen_mum1", "u-95% CI"],
+               Temporal_Estimate=para$Estimate[rownames(para)=="Temporal"],
+               Temporal_lCI=para[rownames(para)=="Temporal", "l-95% CI"],
+               Temporal_uCI=para[rownames(para)=="Temporal", "u-95% CI"],
+               Clan1_Estimate=para$Estimate[rownames(para)=="Clan1"],
+               Clan1_lCI=para[rownames(para)=="Clan1", "l-95% CI"],
+               Clan1_uCI=para[rownames(para)=="Clan1", "u-95% CI"],
+               IgA_Age_Estimate=para$Estimate[rownames(para)=="IgA:Age"],
+               IgA_Age_lCI=para[rownames(para)=="IgA:Age", "l-95% CI"],
+               IgA_Age_uCI=para[rownames(para)=="IgA:Age", "u-95% CI"],
+               Mucin_Age_Estimate=para$Estimate[rownames(para)=="Mucin:Age"],
+               Mucin_Age_lCI=para[rownames(para)=="Mucin:Age", "l-95% CI"],
+               Mucin_Age_uCI=para[rownames(para)=="Mucin:Age", "u-95% CI"]
+               )
+}
+
+res.df <-resdf.fun(modelJ, "Full")
+res.df <- rbind(res.df, resdf.fun(modelBJ, "Bacteria"))
+res.df <- rbind(res.df, resdf.fun(modelFJ, "Fungi"))
+res.df <- rbind(res.df, resdf.fun(modelPJ, "Parasite"))
+
+res.dfA <-resdf.fun(modelA, "Full")
+res.dfA <- rbind(res.dfA, resdf.fun(modelBA, "Bacteria"))
+res.dfA <- rbind(res.dfA, resdf.fun(modelFA, "Fungi"))
+res.dfA <- rbind(res.dfA, resdf.fun(modelPA, "Parasite"))
+
+
+res.df$Domain <- factor(res.df$Domain, levels=c("Full", "Bacteria", "Fungi", "Parasite"))
+res.dfA$Domain <- factor(res.dfA$Domain, levels=c("Full", "Bacteria", "Fungi", "Parasite"))
+
+coul <- c("#744700", "#d63232", "#ffbf00", "#293885")
+
+IgA<-ggplot(res.df, aes(x=IgA_Estimate, y=Domain, colour=Domain))+
+    geom_vline(xintercept=0, linetype="dashed", linewidth=1)+
+    geom_errorbar(aes(xmin=IgA_lCI, xmax=IgA_uCI, colour=Domain),
+                  size=1, width=0.4)+
+    geom_point(size=3)+
+#    scale_x_reverse()+
+   scale_colour_manual(values=coul)+
+#    scale_discrete_vi()+
+    labs(x="f-IgA distance", y="")+
+    theme_classic(base_size=12)+
+    theme(legend.position = "none")
+
+IgAA<-ggplot(res.dfA, aes(x=IgA_Estimate, y=Domain, colour=Domain))+
+    geom_vline(xintercept=0, linetype="dashed", linewidth=1)+
+    geom_errorbar(aes(xmin=IgA_lCI, xmax=IgA_uCI, colour=Domain),
+                  size=1, width=0.4)+
+    geom_point(size=3)+
+#    scale_x_reverse()+
+   scale_colour_manual(values=coul)+
+#    scale_discrete_vi()+
+    labs(x="f-IgA distance", y="")+
+    theme_classic(base_size=12)+
+    theme(legend.position = "none")
+
+Mucin<-ggplot(res.df, aes(x=Mucin_Estimate, y=Domain, colour=Domain))+
+    geom_vline(xintercept=0, linetype="dashed", linewidth=1)+
+    geom_errorbar(aes(xmin=Mucin_lCI, xmax=Mucin_uCI, colour=Domain),
+                  size=1, width=0.4)+
+    geom_point(size=3)+
+#    scale_x_reverse()+
+   scale_colour_manual(values=coul)+
+#    scale_discrete_vi()+
+    labs(x="f-mucin distance", y="")+
+    theme_classic(base_size=12)+
+    theme(legend.position = "none")
+
+MucinA<-ggplot(res.dfA, aes(x=Mucin_Estimate, y=Domain, colour=Domain))+
+    geom_vline(xintercept=0, linetype="dashed", linewidth=1)+
+    geom_errorbar(aes(xmin=Mucin_lCI, xmax=Mucin_uCI, colour=Domain),
+                  size=1, width=0.4)+
+    geom_point(size=3)+
+#    scale_x_reverse()+
+   scale_colour_manual(values=coul)+
+#    scale_discrete_vi()+
+    labs(x="f-mucin distance", y="")+
+    theme_classic(base_size=12)+
+    theme(legend.position = "none")
+
+Age<-ggplot(res.df, aes(x=Age_Estimate, y=Domain, colour=Domain))+
+    geom_vline(xintercept=0, linetype="dashed", linewidth=1)+
+    geom_errorbar(aes(xmin=Age_lCI, xmax=Age_uCI, colour=Domain),
+                  size=1, width=0.4)+
+    geom_point(size=3)+
+#    scale_x_reverse()+
+   scale_colour_manual(values=coul)+
+#    scale_discrete_vi()+
+    labs(x="Age distance", y="")+
+    theme_classic(base_size=12)+
+    theme(legend.position = "none")
+AgeA<-ggplot(res.dfA, aes(x=Age_Estimate, y=Domain, colour=Domain))+
+    geom_vline(xintercept=0, linetype="dashed", linewidth=1)+
+    geom_errorbar(aes(xmin=Age_lCI, xmax=Age_uCI, colour=Domain),
+                  size=1, width=0.4)+
+    geom_point(size=3)+
+#    scale_x_reverse()+
+   scale_colour_manual(values=coul)+
+#    scale_discrete_vi()+
+    labs(x="Age distance", y="")+
+    theme_classic(base_size=12)+
+    theme(legend.position = "none")
+
+Rank<-ggplot(res.df, aes(x=Rank_Estimate, y=Domain, colour=Domain))+
+    geom_vline(xintercept=0, linetype="dashed", linewidth=1)+
+    geom_errorbar(aes(xmin=Rank_lCI, xmax=Rank_uCI, colour=Domain),
+                  size=1, width=0.4)+
+    geom_point(size=3)+
+#    scale_x_reverse()+
+   scale_colour_manual(values=coul)+
+#    scale_discrete_vi()+
+    labs(x="Social rank distance", y="")+
+    theme_classic(base_size=12)+
+    theme(legend.position = "none")
+
+Gen_Mum<-ggplot(res.df, aes(x=Gen_mum1_Estimate, y=Domain, colour=Domain))+
+    geom_vline(xintercept=0, linetype="dashed", linewidth=1)+
+    geom_errorbar(aes(xmin=Gen_mum1_lCI, xmax=Gen_mum1_uCI, colour=Domain),
+                  size=1, width=0.4)+
+    geom_point(size=3)+
+#    scale_x_reverse()+
+   scale_colour_manual(values=coul)+
+#    scale_discrete_vi()+
+    labs(x="Same genetic mother", y="")+
+    theme_classic(base_size=12)+
+    theme(legend.position = "none")
+
+Temporal<-ggplot(res.df, aes(x=Temporal_Estimate, y=Domain, colour=Domain))+
+    geom_vline(xintercept=0, linetype="dashed", linewidth=1)+
+    geom_errorbar(aes(xmin=Temporal_lCI, xmax=Temporal_uCI, colour=Domain),
+                  size=1, width=0.4)+
+    geom_point(size=3)+
+#    scale_x_reverse()+
+   scale_colour_manual(values=coul)+
+#    scale_discrete_vi()+
+    labs(x="Temporal distance", y="")+
+    theme_classic(base_size=12)+
+    theme(legend.position = "none")
+
+Clan1<-ggplot(res.df, aes(x=Clan1_Estimate, y=Domain, colour=Domain))+
+    geom_vline(xintercept=0, linetype="dashed", linewidth=1)+
+    geom_errorbar(aes(xmin=Clan1_lCI, xmax=Clan1_uCI, colour=Domain),
+                  size=1, width=0.4)+
+    geom_point(size=3)+
+#    scale_x_reverse()+
+   scale_colour_manual(values=coul)+
+#    scale_discrete_vi()+
+    labs(x="Same clan", y="")+
+    theme_classic(base_size=12)+
+    theme(legend.position = "none")
+
+Figure2 <- plot_grid(IgA, IgAA, Mucin, MucinA, Age, AgeA, labels="auto", ncol=2)
+ggplot2::ggsave(file="Figures/Figure2.pdf", Figure2, width = 190, height = 200, dpi = 300, units="mm")
+
+# interaction
+library(tidyr)
+library(modelr)
+library(tidybayes)
+
+######################## Figure 3: interaction
+newdata1 <- data.frame(IgA=seq_range(0:1, n=51),
+                       Mucin=rep(median(data.dyad$Mucin), n=51),
+                       Age=rep(1, n=51),
+                       Clan=rep(0, n=51),
+                       IDA=rep("M668", 51),
+                       IDB=rep("M604", 51),
+                       Gen_mum=rep(0, n=51),
+                       Temporal=rep(0, n=51),
+                       Rank=rep(median(data.dyad$Rank)))
+newdata0 <- data.frame(IgA=seq_range(0:1, n=51),
+                       Mucin=rep(median(data.dyad$Mucin), n=51),
+                       Age=rep(0, n=51),
+                       Clan=rep(0, n=51),
+                       IDA=rep("M668", 51),
+                       IDB=rep("M604", 51),
+                       Gen_mum=rep(0, n=51),
+                       Temporal=rep(0, n=51),
+                       Rank=rep(median(data.dyad$Rank)))
+pred.df0 <- add_epred_draws(newdata0, modelPA)
+pred.df1 <- add_epred_draws(newdata1, modelPA)
+
+
+pred.df <- rbind(pred.df0, pred.df1)
+pred.df$Age <- as.factor(pred.df$Age)
+
+IgA_Parasite <-    ggplot(pred.df, aes(x=IgA, y=.epred, group=Age))+
+    stat_lineribbon(size=0.5, .width=c(.95, .8, .5), alpha=0.5)+
+    ylab("Parasite community similarity")+
+    xlab("faecal IgA distances")+
+    theme_classic()
+
+
+newdata1M <- data.frame(Mucin=seq_range(0:1, n=51),
+                       IgA=rep(median(data.dyad$IgA), n=51),
+                       Age=rep(1, n=51),
+                       Clan=rep(0, n=51),
+                       IDA=rep("M668", 51),
+                       IDB=rep("M604", 51),
+                       Gen_mum=rep(0, n=51),
+                       Temporal=rep(0, n=51),
+                       Rank=rep(median(data.dyad$Rank)))
+newdata0M <- data.frame(Mucin=seq_range(0:1, n=51),
+                       IgA=rep(median(data.dyad$IgA), n=51),
+                       Age=rep(0, n=51),
+                       Clan=rep(0, n=51),
+                       IDA=rep("M668", 51),
+                       IDB=rep("M604", 51),
+                       Gen_mum=rep(0, n=51),
+                       Temporal=rep(0, n=51),
+                       Rank=rep(median(data.dyad$Rank)))
+pred.df0M <- add_epred_draws(newdata0M, modelPA)
+pred.df1M <- add_epred_draws(newdata1M, modelPA)
+pred.dfM <- rbind(pred.df0M, pred.df1M)
+pred.dfM$Age <- as.factor(pred.dfM$Age)
+
+
+Mucin_Parasite <- ggplot(pred.dfM, aes(x=Mucin, y=.epred, group=Age))+
+    stat_lineribbon(size=0.5, .width=c(.95, .8, .5), alpha=0.5)+
+    ylab("Parasite community similarity")+
+    xlab("faecal mucin distances")+
+    theme_classic()
+
+
+Parasite_immune <- plot_grid(IgA_Parasite, Mucin_Parasite, labels="auto")
+ggplot2::ggsave(file="Figures/Figure3.pdf", Parasite_immune, width = 190, height = 140, dpi = 300, units="mm")
+
+#####################################################################
+###### network
+Euk <- merge_phyloseq(Parasite, Fungi)
+Euk
+Bacteria
+
+## prevalebce filtering of 10%
+KeepTaxap <- microbiome::prevalence(Euk)>0.1
+Euk<- phyloseq::prune_taxa(KeepTaxap, Euk)
+Euk
+
+KeepTaxap <- microbiome::prevalence(Bacteria)>0.1
+Bac<- phyloseq::prune_taxa(KeepTaxap, Bacteria)
+Bac
+
+#### spiec easi
+pargs <- list(rep.num=1000, seed=10010, ncores=90, thresh=0.05)
+
+## mb
+t1 <- Sys.time()
+se.net <- spiec.easi(list(Bac, Euk), method="mb", pulsar.params=pargs)
+t2 <- Sys.time()
+t2-t1
+saveRDS(se.net, "tmp/se.fnet.rds")
+se.net <- readRDS("tmp/se.fnet.rds")
+
+se.net$select$stars$summary # lambda path
+
+
+se.net$select
+
+#coding bacteria/eukaryote nodes
+dtype <- c(rep(1,ntaxa(Bac)), rep(2,ntaxa(Euk)))
+
+bac.ids=taxa_names(Bac)
+euk.ids= taxa_names(Euk)
+net.ids <- c(bac.ids,euk.ids)
+
+#### plotting
+bm=symBeta(getOptBeta(se.net), mode="maxabs")
+diag(bm) <- 0
+#weights <- Matrix::summary(t(bm))[,3] # includes negative weights
+weights <- (1-Matrix::summary(t(bm))[,3])/2 # ort
+net <- SpiecEasi::adj2igraph(Matrix::drop0(getRefit(se.net)),
+                             edge.attr=list(weight=weights),
+                             vertex.attr = list(name=net.ids))
+
+E(net)
+betaMat=as.matrix(symBeta(getOptBeta(se.net)))
+# we want positive edges to be green and negative to be red
+edges <- E(net)
+edge.colors=c()
+for (e.index in 1:length(edges)){
+    adj.nodes=ends(net, edges[e.index])
+    xindex=which(net.ids==adj.nodes[1])
+    yindex=which(net.ids==adj.nodes[2])
+    beta=betaMat[xindex, yindex]
+    if (beta>0){
+        edge.colors=append(edge.colors, "#1B7837")
+    }else if(beta<0){
+        edge.colors=append(edge.colors, "#762A83")
+    }
+}
+E(net)$color=edge.colors
+
+### defining attributes
+V(net)$type=c(rep("Bacteria", length(taxa_names(Bac))), rep("Eukaryote", length(taxa_names(Euk))))
+V(net)$genus=c(Bac@tax_table[,6], Euk@tax_table[,6])
+V(net)$family=c(Bac@tax_table[,5], Euk@tax_table[,5])
+V(net)$phylum=c(Bac@tax_table[,2], Euk@tax_table[,2])
+V(net)$domain=c(Bac@tax_table[,1], Euk@tax_table[,1])
+
+# curating names
+V(net)$phylum[V(net)$phylum=="Unknown_phylum"] <- "Unknown"
+V(net)$genus <- gsub("Unknown_genus_in_", "", V(net)$genus)
+V(net)$genus <- gsub("_uncultered", "", V(net)$genus)
+
+
+deg <- igraph::degree(net)
+label <- V(net)$genus
+label[deg<4] <- ""
+
+close <- closeness(net)
+betw <- betweenness(net)
+
+vip <- data.frame(degree=deg, closeness=close, betweness=betw, genus=V(net)$genus, phyla=V(net)$phylum)
+
+rownames(vip) <- NULL
+
+V(net)$stype <- c(rep("circle",ntaxa(Bac)), rep("square",ntaxa(Euk)))
+
+#V(net)$lab.hub <- ""
+#V(net)$lab.hub <- V(net)$genus
+#V(net)$label.cex <- 0.5
+#V(net)$label.dist <- 0
+#V(net)$label.degree <- pi/2
+
+# we also want the node color to code for phylum
+nb.col <- length(levels(as.factor(V(net)$phylum)))
+coul <- colorRampPalette(brewer.pal(8, "Accent"))(nb.col)
+mc <- coul[as.numeric(as.factor(V(net)$phylum))]
+
+
+pdf("Figures/Network.pdf",
+    width =10, height = 10)
+set.seed(1002)
+plot(net,
+     layout=layout_with_fr(net),
+     vertex.shape=V(net)$stype,
+     vertex.label="",
+     vertex.label.dist=0.4,
+     vertex.label.degree=-pi/2,
+     vertex.size=deg+3,
+     vertex.color=adjustcolor(mc,0.8),
+     edge.width=as.integer(cut(E(net)$weight, breaks=6))/3,
+     margin=c(0,1,0,0))
+legend(x=-2, y=1, legend=levels(as.factor(V(net)$phylum)), col=coul, bty="n",x.intersp=0.25,text.width=0.045, pch=20, pt.cex=1.5)
+dev.off()
+
