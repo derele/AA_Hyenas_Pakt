@@ -11,7 +11,7 @@ library(Hmisc)
 library(Matrix)
 library(SpiecEasi)
 library(microbiome)
-
+library(brms)
 
 PMS <- readRDS("/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/fPMS.rds")
 PMS <- prune_taxa(taxa_sums(PMS)>0, PMS)
@@ -262,13 +262,17 @@ Fungi <- subset_taxa(PMS, Phylum %in% c("Mucoromycota", "Ascomycota", "Basidiomy
 Parasite2 <- tax_glom(Parasite, "Genus")
 Parasite2
 
+do_Models <- FALSE
+
+if (do_Models){## we want to add genetic mum and surrogate mum, in the future this
 #############################################################################
 ############# let's do dyad comparisons now
 sample_data(PMS)$key <- paste(sample_data(PMS)$hyena_ID,
                               sample_data(PMS)$Sample, sep="_")
 key <- data.frame(ID=sample_data(PMS)$key)
 metadt <- sample_data(PMS)
-
+metadt$IgAP <- log(metadt$IgA_inputed)
+metadt$MucinP <- log(metadt$mucin_inputed)
 # renaming this now
 sample_names(PMS) <- key$ID
 
@@ -369,18 +373,18 @@ for(i in 1:nrow(metadt)){
         }
     }
 }
-
 ClanM<-c(ClanM[lower.tri(ClanM)])  
 
 ## now other distances
 AGEM <- c(dist(metadt[,c("age_sampling")]))
-
 metadt$date_sampling <- as.Date(metadt$date_sampling,
                                 format='%m/%d/%Y')
 SamplingM <- c(dist(metadt$date_sampling))
 RANKM<-c(dist(metadt[,c("CSocialRank")]))
 IGAM<-c(dist(metadt[,c("IgA_inputed")]))
+IGAPM<-c(dist(metadt[,c("IgAP")]))
 MUCM<-c(dist(metadt[,c("mucin_inputed")]))
+MUCPM<-c(dist(metadt[,c("MucinP")]))
 
 # genetic mum
 MUM_frame<-metadt[,c("key","genetic_mum")]
@@ -408,14 +412,15 @@ data.dyad<-data.frame(MS_J=jac,
                       Age=AGEM,
                       Sex=sex,
                       IgA=IGAM,
+                      IgAP=IGAPM,
                       Mucin=MUCM,
+                      MucinP=MUCPM,
                       Rank=RANKM,
                       Gen_mum=MUMM,
                       Temporal=SamplingM,
                       Clan=ClanM)
 
 list<-expand.grid(key$ID, key$ID)
-
 # This created individual-to-same-individual pairs as well. Get rid of these:
 list<-list[which(list$Var1!=list$Var2),]
 # this still has both quantiles in--> add 'unique' key
@@ -427,7 +432,6 @@ JACM[which(rownames(JACM)==list$Var1[i]),which(colnames(JACM)==list$Var2[i])]==j
 # add the names of both individuals participating in each dyad into the data frame
 data.dyad$IDA_s<-list$Var2
 data.dyad$IDB_s<-list$Var1
-
 data.dyad$IDA <- gsub("_.*", "", data.dyad$IDA_s)
 data.dyad$IDB <- gsub("_.*", "", data.dyad$IDB_s)
 
@@ -441,7 +445,8 @@ range.use <- function(x, min.use, max.use){ (x - min(x,na.rm=T))/(max(x,na.rm=T)
 scalecols<-c("Rank",
              "Age",
              "IgA",
-             "Mucin",
+             "IgAP",
+             "MucinP",
              "Parasite_A",
              "Bacteria_A",
              "Parasite_A",
@@ -452,161 +457,118 @@ scalecols<-c("Rank",
 for(i in 1:ncol(data.dyad[,which(colnames(data.dyad)%in%scalecols)])){
     data.dyad[,which(colnames(data.dyad)%in%scalecols)][,i]<-
         range.use(data.dyad[,which(colnames(data.dyad)%in%scalecols)][,i],0,1)
-    }
-
-
-library(brms)
-
+}
 ### Multivariate model for Parasite, Fungi and Bacteria
-#bformJ <- bf(mvbind(Fungi_J, Parasite_J, Bacteria_J)~1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
-#                Temporal+ Clan+Age:IgA+Age:Mucin+
-#                (1|mm(IDA,IDB)))+ set_rescor(TRUE)  
-#fitJ <- brm(bformJ, data = data.dyad,
-#            family= "gaussian",
-#            warmup = 1000, iter = 3000,
-#            cores = 20, chains = 4,
-#            inits=0)
-#saveRDS(fitJ, "tmp/modelJ_FPB.rds")
+bformJ <- bf(mvbind(Fungi_J, Parasite_J, Bacteria_J)~1+ IgAP+ MucinP + Age+  Rank+ Gen_mum+
+                Temporal+ Clan+Age:IgAP+Age:MucinP+
+                (1|mm(IDA,IDB)))+ set_rescor(TRUE)  
+fitJ <- brm(bformJ, data = data.dyad,
+            family= "gaussian",
+            warmup = 1000, iter = 3000,
+            cores = 20, chains = 4,
+            inits=0)
+saveRDS(fitJ, "tmp/modelJ_FPB.rds")
 #
-#bformA <- bf(mvbind(Fungi_A, Parasite_A, Bacteria_A)~1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
-#                Temporal+ Clan+Age:IgA+Age:Mucin+
-#                (1|mm(IDA,IDB)))+ set_rescor(TRUE)  
-#fitA <- brm(bformA, data = data.dyad,
-#            family= "gaussian",
-#            warmup = 1000, iter = 3000,
-#            cores = 20, chains = 4,
-#            inits=0)
-#saveRDS(fitA, "tmp/modelA_FPB.rds")
+bformA <- bf(mvbind(Fungi_A, Parasite_A, Bacteria_A)~1+ IgAP+ MucinP + Age+  Rank+ Gen_mum+
+                Temporal+ Clan+Age:IgAP+Age:MucinP+
+                (1|mm(IDA,IDB)))+ set_rescor(TRUE)  
+fitA <- brm(bformA, data = data.dyad,
+            family= "gaussian",
+            warmup = 1000, iter = 3000,
+            cores = 20, chains = 4,
+            inits=0)
+saveRDS(fitA, "tmp/modelA_FPB.rds")
 
 #### model
-#modelJ<-brm(MS_J~ 1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
-#                Temporal+ Clan+Age:IgA+Age:Mucin+
-#                (1|mm(IDA,IDB)),
-#            data = data.dyad,
-#            family= "gaussian",
-#            warmup = 1000, iter = 3000,
-#            cores = 20, chains = 4,
-#            inits=0)
-#saveRDS(modelJ, "tmp/modelJ.rds")
+modelJ<-brm(MS_J~ 1+ IgAP+ MucinP + Age+  Rank+ Gen_mum+
+                Temporal+ Clan+Age:IgAP+Age:MucinP+
+                (1|mm(IDA,IDB)),
+            data = data.dyad,
+            family= "gaussian",
+            warmup = 1000, iter = 3000,
+            cores = 20, chains = 4,
+            inits=0)
+saveRDS(modelJ, "tmp/modelJ.rds")
 #
-#modelA<-brm(MS_A~1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
-#                Temporal+ Clan+Age:IgA+Age:Mucin+
-#                (1|mm(IDA,IDB)),
-#                data = data.dyad,
-#                family= "gaussian",
-#                warmup = 1000, iter = 3000,
-#                cores = 20, chains = 4,
-#                inits=0)
-#saveRDS(modelA, "tmp/modelA.rds")
-#modelA <- readRDS("tmp/modelA.rds")
-
+modelA<-brm(MS_A~1+ IgAP+ MucinP + Age+  Rank+ Gen_mum+
+                Temporal+ Clan+Age:IgAP+Age:MucinP+
+                (1|mm(IDA,IDB)),
+                data = data.dyad,
+                family= "gaussian",
+                warmup = 1000, iter = 3000,
+                cores = 20, chains = 4,
+                inits=0)
+saveRDS(modelA, "tmp/modelA.rds")
+#
 #### individual models for plotting
-#modelJ<-brm(MS_J~ 1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
-#                Temporal+ Clan+Age:IgA+Age:Mucin+
-#                (1|mm(IDA,IDB)),
-#            data = data.dyad,
-#            family= "gaussian",
-#            warmup = 1000, iter = 3000,
-#            cores = 20, chains = 4,
-#            inits=0)
-#saveRDS(modelJ, "tmp/modelJ.rds")
+modelFJ <- brm(Fungi_J~1+ IgAP+ MucinP + Age+  Rank+ Gen_mum+
+                Temporal+ Clan +Age:IgAP+Age:MucinP+
+                (1|mm(IDA,IDB)),
+                data = data.dyad,
+                family= "gaussian",
+                warmup = 1000, iter = 3000,
+                cores = 20, chains = 4,
+                inits=0)
+saveRDS(modelFJ, "tmp/modelFJ.rds")
 #
-#modelA<-brm(MS_A~1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
-#                Temporal+ Clan+Age:IgA+Age:Mucin+
-#                (1|mm(IDA,IDB)),
-#                data = data.dyad,
-#                family= "gaussian",
-#                warmup = 1000, iter = 3000,
-#                cores = 20, chains = 4,
-#                inits=0)
-#saveRDS(modelA, "tmp/modelA.rds")
-#modelA <- readRDS("tmp/modelA.rds")
+modelFA <- brm(Fungi_A ~1 + IgAP+ MucinP + Age+  Rank+ Gen_mum+
+               Temporal+ Clan+ Age:IgAP+Age:MucinP+
+                (1|mm(IDA,IDB)),
+                data = data.dyad,
+                family= "gaussian",
+                warmup = 1000, iter = 3000,
+                cores = 20, chains = 4,
+                inits=0)
+saveRDS(modelFA, "tmp/modelFA.rds")
 #
-#modelFJ <- brm(Fungi_J~1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
-#                Temporal+ Clan +Age:IgA+Age:Mucin+
-#                (1|mm(IDA,IDB)),
-#                data = data.dyad,
-#                family= "gaussian",
-#                warmup = 1000, iter = 3000,
-#                cores = 20, chains = 4,
-#                inits=0)
-#saveRDS(modelFJ, "tmp/modelFJ.rds")
+modelBJ <- brm(Bacteria_J~1+IgAP+ MucinP + Age+  Rank+ Gen_mum+
+                   Temporal+ Clan+Age:IgAP+Age:MucinP+
+                (1|mm(IDA,IDB)),
+                data = data.dyad,
+                family= "gaussian",
+                warmup = 1000, iter = 3000,
+                cores = 20, chains = 4,
+                inits=0)
+saveRDS(modelBJ, "tmp/modelBJ.rds")
 #
-#modelFA <- brm(Fungi_A ~1 + IgA+ Mucin + Age+  Rank+ Gen_mum+
-#               Temporal+ Clan+ Age:IgA+Age:Mucin+
-#                (1|mm(IDA,IDB)),
-#                data = data.dyad,
-#                family= "gaussian",
-#                warmup = 1000, iter = 3000,
-#                cores = 20, chains = 4,
-#                inits=0)
-#saveRDS(modelFA, "tmp/modelFA.rds")
+modelBA <- brm(Bacteria_A~1+IgAP+ MucinP + Age+  Rank+ Gen_mum+
+                Temporal+ Clan +Age:IgAP+Age:MucinP+
+                (1|mm(IDA,IDB)),
+                data = data.dyad,
+                family= "gaussian",
+                warmup = 1000, iter = 3000,
+                cores = 20, chains = 4,
+                inits=0)
+saveRDS(modelBA, "tmp/modelBA.rds")
 #
-#modelBJ <- brm(Bacteria_J~1+IgA+ Mucin + Age+  Rank+ Gen_mum+
-#                   Temporal+ Clan+Age:IgA+Age:Mucin+
-#                (1|mm(IDA,IDB)),
-#                data = data.dyad,
-#                family= "gaussian",
-#                warmup = 1000, iter = 3000,
-#                cores = 20, chains = 4,
-#                inits=0)
-#saveRDS(modelBJ, "tmp/modelBJ.rds")
+modelPJ <- brm(Parasite_J~1+ IgAP+ MucinP + Age+  Rank+ Gen_mum+
+                Temporal+ Clan +Age:IgAP+Age:MucinP+
+                (1|mm(IDA,IDB)),
+                data = data.dyad,
+                family= "gaussian",
+                warmup = 1000, iter = 3000,
+                cores = 20, chains = 4,
+                inits=0)
+saveRDS(modelPJ, "tmp/modelPJ.rds")
 #
-#modelBA <- brm(Bacteria_A~1+IgA+ Mucin + Age+  Rank+ Gen_mum+
-#                Temporal+ Clan +Age:IgA+Age:Mucin+
-#                (1|mm(IDA,IDB)),
-#                data = data.dyad,
-#                family= "gaussian",
-#                warmup = 1000, iter = 3000,
-#                cores = 20, chains = 4,
-#                inits=0)
-#saveRDS(modelBA, "tmp/modelBA.rds")
-#
-#modelPJ <- brm(Parasite_J~1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
-#                Temporal+ Clan +Age:IgA+Age:Mucin+
-#                (1|mm(IDA,IDB)),
-#                data = data.dyad,
-#                family= "gaussian",
-#                warmup = 1000, iter = 3000,
-#                cores = 20, chains = 4,
-#                inits=0)
-#saveRDS(modelPJ, "tmp/modelPJ.rds")
-#
-#modelPA <- brm(Parasite_A ~1 + IgA+ Mucin + Age+  Rank+ Gen_mum+
-#               Temporal+ Clan+ Age:IgA+Age:Mucin+
-#                (1|mm(IDA,IDB)),
-#                data = data.dyad,
-#                family= "gaussian",
-#                warmup = 1000, iter = 3000,
-#                cores = 20, chains = 4,
-#                inits=0)
-#saveRDS(modelPA, "tmp/modelPA.rds")
-#
-#model_intJ <- brm(Parasite_J~ Bacteria_J+Fungi_J+
-#                (1|mm(IDA,IDB)),
-#                data = data.dyad,
-#                family= "gaussian",
-#                warmup = 1000, iter = 3000,
-#                cores = 20, chains = 4,
-#                inits=0)
-#saveRDS(model_intJ, "tmp/model_intJ.rds")
-#
-#model_intA <- brm(Parasite_A~ Bacteria_A+Fungi_A+
-#                (1|mm(IDA,IDB)),
-#                data = data.dyad,
-#                family= "gaussian",
-#                warmup = 1000, iter = 3000,
-#                cores = 20, chains = 4,
-#                inits=0)
-#saveRDS(model_intA, "tmp/model_intA.rds")
-#
+modelPA <- brm(Parasite_A ~1 + IgAP+ MucinP + Age+  Rank+ Gen_mum+
+               Temporal+ Clan+ Age:IgAP+Age:MucinP+
+                (1|mm(IDA,IDB)),
+                data = data.dyad,
+                family= "gaussian",
+                warmup = 1000, iter = 3000,
+                cores = 20, chains = 4,
+                inits=0)
+saveRDS(modelPA, "tmp/modelPA.rds")
+
+saveRDS(data.dyad, "tmp/data.dyad.rds")
+} else
+    data.dyad <- readRDS("tmp/data.dyad.rds")
 
 modelJ_FPB <- readRDS("tmp/modelJ_FPB.rds")
 modelA_FPB <- readRDS("tmp/modelA_FPB.rds")
-
-modelA <- readRDS("tmp/modelA.rds")
-modelJ <- readRDS("tmp/modelJ.rds")
-
+#modelA <- readRDS("tmp/modelA.rds")
+#modelJ <- readRDS("tmp/modelJ.rds")
 model_intJ <- readRDS("tmp/model_intJ.rds")
 model_intA <- readRDS("tmp/model_intA.rds")
 modelFA <- readRDS("tmp/modelFA.rds")
@@ -616,154 +578,31 @@ modelBA <- readRDS("tmp/modelBA.rds")
 modelPJ <- readRDS("tmp/modelPJ.rds")
 modelPA <- readRDS("tmp/modelPA.rds")
 
+print(summary(modelJ), digits=3)
+print(summary(modelA), digits=3)
 print(summary(modelFJ), digits=3)
 print(summary(modelPJ), digits=3)
 print(summary(modelBJ), digits=3)
 print(summary(modelJ), digits=3)
-
 print(summary(modelPA), digits=3)
 print(summary(modelFA), digits=3)
 print(summary(modelBA), digits=3)
+
 print(summary(modelA), digits=3)
 
 print(summary(modelJ_FPB), digits=3)
 print(summary(modelA_FPB), digits=3)
 
-### testing increases of variance with IgA
-summary(metadt$IgA_inputed)
-metadt$IgA_g <- "med"
-metadt$IgA_g[metadt$IgA_inputed>quantile(metadt$IgA_inputed, probs=0.75)] <- "high"
-metadt$IgA_g[metadt$IgA_inputed<quantile(metadt$IgA_inputed, probs=0.25)] <- "low"
-
-### testing increases of variance with mucin
-metadt$mucin_g <- "med"
-metadt$mucin_g[metadt$mucin_inputed>quantile(metadt$mucin_inputed, probs=0.75)] <- "high"
-metadt$mucin_g[metadt$mucin_inputed<quantile(metadt$mucin_inputed, probs=0.25)] <- "low"
-
-
-
-PJ <- phyloseq::distance(Parasite,method="jaccard",
-                                     type="samples",
-                                     binary=T)
-PJ[is.na(PJ)]<- 0 # defining those as 0 distances
-
-PJ_dis <- betadisper(PJ, metadt$IgA_g)
-TukeyHSD(PJ_dis)
-
-metadt$PJ_dis <- PJ_dis$distances
-metadt$IgA_g <- factor(metadt$IgA_g, levels=c("low", "med", "high"))
-
-adonis2(PJ~metadt$IgA_g+
-          metadt$mucin_g,
-      by="margin")
-
-
-adonis2(PJ~metadt$IgA_inputed+
-            metadt$mucin_inputed,
-      by="margin")
-
-otu <- (Parasite@otu_table)
-
-colnames(otu) <- paste("ASV", seq(1:ncol(otu)), Parasite@tax_table[,6], sep="_")
-
-dt <- cbind(otu, metadt)
-
-paste(colnames(otu), collapse=" ,")
-
-library(brms)
-
-bformP <- bf(mvbind(ASV_1_Sarcocystis ,ASV_2_Cystoisospora ,ASV_3_Cystoisospora ,ASV_4_Cryptosporidium ,ASV_5_Rhabditida ,ASV_6_Rhabditida ,ASV_7_Rhabditida ,ASV_8_Rhabditida ,ASV_9_Rhabditida ,ASV_10_Ascaridida ,ASV_11_Spirurida ,ASV_12_Spirurida ,ASV_13_Spirurida ,ASV_14_Cystoisospora ,ASV_15_Cystoisospora ,ASV_16_Cryptosporidium ,ASV_17_Cryptosporidium ,ASV_18_Diphyllobothriidea ,ASV_19_Cyclophyllidea ,ASV_20_Cryptosporidium ,ASV_21_Cyclophyllidea ,ASV_22_Rhabditida ,ASV_23_Sarcocystis ,ASV_24_Sarcocystis ,ASV_25_Sarcocystis)~1+IgA_inputed+mucin_inputed)+set_rescor(TRUE)
-
-fit <- brm(bformP, data=dt,
-           family= "gaussian",
-            warmup = 1000, iter = 3000,
-            cores = 20, chains = 4,
-            inits=0)
-
-#bformJ <- bf(mvbind(Fungi_J, Parasite_J, Bacteria_J)~1+ IgA+ Mucin + Age+  Rank+ Gen_mum+
-#                Temporal+ Clan+Age:IgA+Age:Mucin+
-#                (1|mm(IDA,IDB)))+ set_rescor(TRUE)  
-#fitJ <- brm(bformJ, data = data.dyad,
-#            family= "gaussian",
-#            warmup = 1000, iter = 3000,
-#            cores = 20, chains = 4,
-#            inits=0)
-#saveRDS(fitJ, "tmp/modelJ_FPB.rds")
-
-colnames(metadt)
-
-#model_intA <- brm(Parasite_A~ Bacteria_A+Fungi_A+
-#                (1|mm(IDA,IDB)),
-#                data = data.dyad,
-#                family= "gaussian",
-#                warmup = 1000, iter = 3000,
-#                cores = 20, chains = 4,
-#                inits=0)
-#saveRDS(model_intA, "tmp/model_intA.rds")
-
-
-
-PJ_centroid <- ggplot(metadt, aes(x=IgA_g, y=PJ_dis))+
-        geom_boxplot(outlier.shape = NA)+
-    geom_point(aes(fill=IgA_g), colour="black",pch=21,size=3, alpha=0.4)+
-    scale_fill_manual(values=c("#f1c40f", "#f39c12", "#ba4a00"))+
-    labs(x="f-IgA levels", y="Parasite composition variation (distance to centroid)")+
-theme_classic()+
-    theme(legend.position="none")
-
-PJ_MUC <- betadisper(PJ, metadtmucin_g)
-TukeyHSD(PJ_MUC)
-
-metadt$PJ_MUC <- PJ_MUC$distances
-metadt$mucin_g <- factor(metadt$mucin_g, levels=c("low", "med", "high"))
-
-PJ_Mcentroid <- ggplot(metadt, aes(x=mucin_g, y=PJ_MUC))+
-        geom_boxplot(outlier.shape = NA)+
-    geom_point(aes(fill=mucin_g), colour="black",pch=21,size=3, alpha=0.4)+
-    scale_fill_manual(values=c("#f1c40f", "#f39c12", "#ba4a00"))+
-    labs(x="f-mucin levels", y="Parasite composition variation (distance to centroid)")+
-theme_classic()+
-    theme(legend.position="none")
-
-
-plot_grid(PJ_centroid, PJ_Mcentroid)
-
-plot_grid(IgA, PJ_centroid, Mucin, PJ_Mcentroid)
-
-FA <- vegan::vegdist(Fungi@otu_table,
-                                 method="aitchison",
-                                 pseudocount=1)
-FA[is.na(FA)]<- 0 # defining those as 0 distances
-
-FA_d <- betadisper(FA, metadt$IgA_g)
-TukeyHSD(betadisper(FA, metadt$IgA_g))
-
-metadt$FA_dis <- FA_d$distances
-
-FA_centroid <- ggplot(metadt, aes(x=IgA_g, y=FA_dis))+
-        geom_boxplot(outlier.shape = NA)+
-    geom_point(aes(fill=IgA_g), colour="black",pch=21,size=3, alpha=0.4)+
-    scale_fill_manual(values=c("#f1c40f", "#f39c12", "#ba4a00"))+
-    labs(x="f-IgA levels", y="Fungi composition variaton (distance to centroid)")+
-theme_classic()+
-    theme(legend.position="none")
-
-centroid <- plot_grid(PJ_centroid, FA_centroid, labels="auto", nrow=1)
-
-
-#ggplot2::ggsave(file="Figures/Figure2.pdf", Parasite_immune, width = 190, height = 140, dpi = 300, units="mm")
-
-
-## plotting
+############################# plotting
 resdf.fun<- function(modelJ, name){
     para <- summary(modelJ)$fixed
     data.frame(Domain=name,
-               IgA_Estimate=para[rownames(para)=="IgA", "Estimate"],
-               IgA_lCI=para[rownames(para)=="IgA", "l-95% CI"],
-               IgA_uCI=para[rownames(para)=="IgA", "u-95% CI"],
-               Mucin_Estimate=para[rownames(para)=="Mucin", "Estimate"],
-               Mucin_lCI=para[rownames(para)=="Mucin", "l-95% CI"],
-               Mucin_uCI=para[rownames(para)=="Mucin", "u-95% CI"],
+               IgA_Estimate=para[rownames(para)=="IgAP", "Estimate"],
+               IgA_lCI=para[rownames(para)=="IgAP", "l-95% CI"],
+               IgA_uCI=para[rownames(para)=="IgAP", "u-95% CI"],
+               Mucin_Estimate=para[rownames(para)=="MucinP", "Estimate"],
+               Mucin_lCI=para[rownames(para)=="MucinP", "l-95% CI"],
+               Mucin_uCI=para[rownames(para)=="MucinP", "u-95% CI"],
                Age_Estimate=para$Estimate[rownames(para)=="Age"],
                Age_lCI=para[rownames(para)=="Age", "l-95% CI"],
                Age_uCI=para[rownames(para)=="Age", "u-95% CI"],
@@ -779,12 +618,12 @@ resdf.fun<- function(modelJ, name){
                Clan1_Estimate=para$Estimate[rownames(para)=="Clan1"],
                Clan1_lCI=para[rownames(para)=="Clan1", "l-95% CI"],
                Clan1_uCI=para[rownames(para)=="Clan1", "u-95% CI"],
-               IgA_Age_Estimate=para$Estimate[rownames(para)=="IgA:Age"],
-               IgA_Age_lCI=para[rownames(para)=="IgA:Age", "l-95% CI"],
-               IgA_Age_uCI=para[rownames(para)=="IgA:Age", "u-95% CI"],
-               Mucin_Age_Estimate=para$Estimate[rownames(para)=="Mucin:Age"],
-               Mucin_Age_lCI=para[rownames(para)=="Mucin:Age", "l-95% CI"],
-               Mucin_Age_uCI=para[rownames(para)=="Mucin:Age", "u-95% CI"]
+               IgA_Age_Estimate=para$Estimate[rownames(para)=="IgAP:Age"],
+               IgA_Age_lCI=para[rownames(para)=="IgAP:Age", "l-95% CI"],
+               IgA_Age_uCI=para[rownames(para)=="IgAP:Age", "u-95% CI"],
+               Mucin_Age_Estimate=para$Estimate[rownames(para)=="MucinP:Age"],
+               Mucin_Age_lCI=para[rownames(para)=="MucinP:Age", "l-95% CI"],
+               Mucin_Age_uCI=para[rownames(para)=="MucinP:Age", "u-95% CI"]
                )
 }
 
@@ -797,7 +636,6 @@ res.dfA <-resdf.fun(modelA, "Full")
 res.dfA <- rbind(res.dfA, resdf.fun(modelBA, "Bacteria"))
 res.dfA <- rbind(res.dfA, resdf.fun(modelFA, "Fungi"))
 res.dfA <- rbind(res.dfA, resdf.fun(modelPA, "Parasite"))
-
 
 res.df$Domain <- factor(res.df$Domain, levels=c("Full", "Bacteria", "Fungi", "Parasite"))
 res.dfA$Domain <- factor(res.dfA$Domain, levels=c("Full", "Bacteria", "Fungi", "Parasite"))
@@ -924,7 +762,7 @@ Clan1<-ggplot(res.df, aes(x=Clan1_Estimate, y=Domain, colour=Domain))+
     theme(legend.position = "none")
 
 Figure2 <- plot_grid(IgA, IgAA, Mucin, MucinA, Age, AgeA, labels="auto", ncol=2)
-ggplot2::ggsave(file="Figures/Figure2.pdf", Figure2, width = 190, height = 200, dpi = 300, units="mm")
+ggplot2::ggsave(file="Figures/Figure2.pdf", Figure2, width = 190, height = 150, dpi = 300, units="mm")
 
 # interaction
 library(tidyr)
@@ -932,8 +770,8 @@ library(modelr)
 library(tidybayes)
 
 ######################## Figure 3: interaction
-newdata1 <- data.frame(IgA=seq_range(0:1, n=51),
-                       Mucin=rep(median(data.dyad$Mucin), n=51),
+newdata1 <- data.frame(IgAP=seq_range(0:1, n=51),
+                       MucinP=rep(median(data.dyad$MucinP), n=51),
                        Age=rep(1, n=51),
                        Clan=rep(0, n=51),
                        IDA=rep("M668", 51),
@@ -941,8 +779,8 @@ newdata1 <- data.frame(IgA=seq_range(0:1, n=51),
                        Gen_mum=rep(0, n=51),
                        Temporal=rep(0, n=51),
                        Rank=rep(median(data.dyad$Rank)))
-newdata0 <- data.frame(IgA=seq_range(0:1, n=51),
-                       Mucin=rep(median(data.dyad$Mucin), n=51),
+newdata0 <- data.frame(IgAP=seq_range(0:1, n=51),
+                       MucinP=rep(median(data.dyad$MucinP), n=51),
                        Age=rep(0, n=51),
                        Clan=rep(0, n=51),
                        IDA=rep("M668", 51),
@@ -957,15 +795,15 @@ pred.df1 <- add_epred_draws(newdata1, modelPA)
 pred.df <- rbind(pred.df0, pred.df1)
 pred.df$Age <- as.factor(pred.df$Age)
 
-IgA_Parasite <-    ggplot(pred.df, aes(x=IgA, y=.epred, group=Age))+
+IgA_Parasite <-    ggplot(pred.df, aes(x=IgAP, y=.epred, group=Age))+
     stat_lineribbon(size=0.5, .width=c(.95, .8, .5), alpha=0.5)+
     ylab("Parasite community similarity")+
     xlab("faecal IgA distances")+
     theme_classic()
 
 
-newdata1M <- data.frame(Mucin=seq_range(0:1, n=51),
-                       IgA=rep(median(data.dyad$IgA), n=51),
+newdata1M <- data.frame(MucinP=seq_range(0:1, n=51),
+                       IgAP=rep(median(data.dyad$IgAP), n=51),
                        Age=rep(1, n=51),
                        Clan=rep(0, n=51),
                        IDA=rep("M668", 51),
@@ -973,8 +811,8 @@ newdata1M <- data.frame(Mucin=seq_range(0:1, n=51),
                        Gen_mum=rep(0, n=51),
                        Temporal=rep(0, n=51),
                        Rank=rep(median(data.dyad$Rank)))
-newdata0M <- data.frame(Mucin=seq_range(0:1, n=51),
-                       IgA=rep(median(data.dyad$IgA), n=51),
+newdata0M <- data.frame(MucinP=seq_range(0:1, n=51),
+                       IgAP=rep(median(data.dyad$IgAP), n=51),
                        Age=rep(0, n=51),
                        Clan=rep(0, n=51),
                        IDA=rep("M668", 51),
@@ -988,15 +826,99 @@ pred.dfM <- rbind(pred.df0M, pred.df1M)
 pred.dfM$Age <- as.factor(pred.dfM$Age)
 
 
-Mucin_Parasite <- ggplot(pred.dfM, aes(x=Mucin, y=.epred, group=Age))+
+Mucin_Parasite <- ggplot(pred.dfM, aes(x=MucinP, y=.epred, group=Age))+
     stat_lineribbon(size=0.5, .width=c(.95, .8, .5), alpha=0.5)+
     ylab("Parasite community similarity")+
     xlab("faecal mucin distances")+
     theme_classic()
 
-
 Parasite_immune <- plot_grid(IgA_Parasite, Mucin_Parasite, labels="auto")
 ggplot2::ggsave(file="Figures/Figure3.pdf", Parasite_immune, width = 190, height = 140, dpi = 300, units="mm")
+
+#############################
+# random forest regression
+
+library(caret)
+library(ranger)
+
+otu <- PMS@otu_table
+
+colnames(otu) <- paste("ASV", seq(1, length(colnames(otu))), PMS@tax_table[,6], sep="_")
+df <- data.frame(otu, IgA=PMS@sam_data$IgA_inputed)
+df$IgA <- log(df$IgA)
+
+set.seed(55)
+trainIndex <- createDataPartition(df$IgA, p=0.8, list=FALSE, times=1)
+IgA_df_train <- df[trainIndex,]
+IgA_df_test <- df[-trainIndex,]
+
+set.seed(55)
+fitControl <- trainControl(method="repeatedcv", number=10, repeats=10)
+
+rfFit1 <- train(IgA~., data=IgA_df_train,
+                method="ranger",
+                trControl=fitControl,
+                importance="permutation")
+
+
+print(rfFit1)
+
+print(rfFit1$finalModel)
+
+
+test_predictions <- predict(rfFit1, newdata=IgA_df_test)
+print(postResample(test_predictions, IgA_df_test$IgA))
+
+pred_obs <- data.frame(predicted=test_predictions, observed=IgA_df_test$IgA)
+
+corr <- ggplot(pred_obs, aes(x=predicted, y=observed))+
+    geom_point(size=3, color="orange")+
+    geom_abline(linetype=5, color="blue", size=1)+
+    theme_classic()
+
+imp <- varImp(rfFit1)
+imp <- imp$importance
+imp$taxa <- rownames(imp)
+rownames(imp) <- NULL
+imp <- imp[order(-imp$Overall),]
+imp20 <- imp[1:20,]
+imp20 <- droplevels(imp20)
+imp20$taxa <- with(imp20, reorder(taxa, Overall))
+
+topImp <- ggplot(imp20, aes(y=taxa, x=Overall))+
+    geom_segment( aes(yend=taxa, xend=0)) +
+    geom_point(size=4, color="orange")+
+    labs(x="importance", y="")+
+    theme_classic()
+
+plot_grid(corr, topImp, labels="auto")
+
+library(patchwork)
+
+library(patchwork)
+
+library(pdp)
+
+#devtools::install_github("bgreenwell/pdp")
+
+partial(rfFit1, pred.var = top_features[], rug = TRUE)
+
+top_features <- imp20$taxa[1:10]
+pd_plots <- list(NULL)
+for (feature in 1:length(top_features)) {
+    pd_plots[[feature]] <- partial(rfFit1, pred.var = top_features[feature], rug = TRUE) %>% autoplot() +
+        geom_hline(yintercept = mean(IgA_df_train$IgA), linetype = 2, color = "gray") + # Show the mean of the training data as a dashed line
+#            scale_y_continuous(limits=c(1.5,2.3)) + # Harmonize the scale of yhat on all plots
+        theme(panel.border = element_rect(colour = "black", fill = NA),
+                      panel.background = element_blank())
+    print(paste0("Partial dependence of ", top_features[feature]))
+}
+
+
+
+#plot(varImp(rfFit1))
+
+
 
 #####################################################################
 ###### network
