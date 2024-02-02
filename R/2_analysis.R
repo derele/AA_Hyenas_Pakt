@@ -570,6 +570,7 @@ saveRDS(data.dyad, "tmp/data.dyad.rds")
 
 modelJ_FPB <- readRDS("tmp/modelJ_FPB.rds")
 modelA_FPB <- readRDS("tmp/modelA_FPB.rds")
+
 modelA <- readRDS("tmp/modelA.rds")
 modelJ <- readRDS("tmp/modelJ.rds")
 #model_intJ <- readRDS("tmp/model_intJ.rds")
@@ -582,6 +583,7 @@ modelPJ <- readRDS("tmp/modelPJ.rds")
 modelPA <- readRDS("tmp/modelPA.rds")
 
 print(summary(modelJ), digits=3)
+
 print(summary(modelA), digits=3)
 print(summary(modelFJ), digits=3)
 print(summary(modelPJ), digits=3)
@@ -846,18 +848,19 @@ library(ranger)
 library(pdp)
 library(patchwork)
 
-otu <- PMS@otu_table
+PMS.t <- transform(PMS, "compositional") # transform to make all taxa from 0 to 1
+otu <- PMS.t@otu_table
 
 colnames(otu) <- paste("ASV", seq(1, length(colnames(otu))), PMS@tax_table[,6], sep="_")
-df <- data.frame(otu, IgA=PMS@sam_data$IgA_inputed)
+df <- data.frame(otu, IgA=PMS.t@sam_data$IgA_inputed)
 df$IgA <- log(df$IgA)
 
-set.seed(55)
+set.seed(56)
 trainIndex <- createDataPartition(df$IgA, p=0.8, list=FALSE, times=1)
 IgA_df_train <- df[trainIndex,]
 IgA_df_test <- df[-trainIndex,]
 
-set.seed(55)
+set.seed(12)
 fitControl <- trainControl(method="repeatedcv", number=10, repeats=10)
 
 rfFit1 <- train(IgA~., data=IgA_df_train,
@@ -867,7 +870,6 @@ rfFit1 <- train(IgA~., data=IgA_df_train,
 
 
 print(rfFit1)
-
 print(rfFit1$finalModel)
 
 
@@ -901,9 +903,6 @@ Fig4 <- plot_grid(corr, topImp, labels="auto", rel_widths=c(0.6, 1))
 ggplot2::ggsave(file="Figures/Figure4.pdf", Fig4, width = 200, height = 90, dpi = 300, units="mm")
 
 
-
-#devtools::install_github("bgreenwell/pdp")
-
 top_features <- imp20$taxa
 
 pd_plots <- list(NULL)
@@ -928,6 +927,79 @@ ggplot2::ggsave(file="Figures/Figure5.pdf", fig4, width = 200, height = 250, dpi
 
 
 #plot(varImp(rfFit1))
+
+
+# for mucin
+df <- data.frame(otu, Mucin=PMS.t@sam_data$mucin_inputed)
+df$Mucin <- log(df$Mucin)
+
+set.seed(57)
+trainIndex <- createDataPartition(df$Mucin, p=0.8, list=FALSE, times=1)
+Mucin_df_train <- df[trainIndex,]
+Mucin_df_test <- df[-trainIndex,]
+
+set.seed(13)
+fitControl <- trainControl(method="repeatedcv", number=10, repeats=10)
+
+rfFitM <- train(Mucin~., data=Mucin_df_train,
+                method="ranger",
+                trControl=fitControl,
+                importance="permutation")
+
+
+print(rfFitM)
+print(rfFitM$finalModel)
+
+
+test_predictions <- predict(rfFitM, newdata=Mucin_df_test)
+print(postResample(test_predictions, Mucin_df_test$Mucin))
+
+pred_obs <- data.frame(predicted=test_predictions, observed=Mucin_df_test$Mucin)
+
+corrM <- ggplot(pred_obs, aes(x=predicted, y=observed))+
+    geom_point(size=3, color="orange")+
+    geom_abline(linetype=5, color="blue", size=1)+
+    theme_classic()
+
+impM <- varImp(rfFitM)
+impM <- impM$importance
+impM$taxa <- rownames(impM)
+rownames(impM) <- NULL
+impM <- impM[order(-impM$Overall),]
+impM20 <- impM[1:20,]
+impM20 <- droplevels(impM20)
+impM20$taxa <- with(impM20, reorder(taxa, Overall))
+
+topMImp <- ggplot(impM20, aes(y=taxa, x=Overall))+
+    geom_segment( aes(yend=taxa, xend=0)) +
+    geom_point(size=4, color="orange")+
+    labs(x="importance", y="")+
+    theme_classic()
+
+Fig5 <- plot_grid(corrM, topMImp, labels="auto", rel_widths=c(0.6, 1))
+
+top_features <- impM20$taxa
+
+pd_plots <- list(NULL)
+
+top_features <- as.character(top_features)
+
+for (a in 1:length(top_features)) {
+    pd_plots[[a]] <-pdp::partial(rfFitM, pred.var=top_features[a], rug=TRUE)%>%
+        autoplot()+
+        geom_hline(yintercept = mean(Mucin_df_train$Mucin), linetype = 2, color = "gray") + 
+#            scale_y_continuous(limits=c(1.5,2.3)) + # Harmonize the scale of yhat on all plots
+        theme(panel.border = element_rect(colour = "black", fill = NA),
+                      panel.background = element_blank())
+    print(paste0("Partial dependence of ", top_features[a]))
+}
+
+fig5_2 <- wrap_plots(pd_plots, ncol=4)
+
+fig5 <- plot_grid(Fig5, fig5_2, nrow=2, rel_heights=c(0.5, 1))
+
+ggplot2::ggsave(file="Figures/Figure5.pdf", fig5, width = 200, height = 250, dpi = 300, units="mm")
+
 
 
 #####################################################################
