@@ -262,12 +262,12 @@ Fungi <- subset_taxa(PMS, Phylum %in% c("Mucoromycota", "Ascomycota", "Basidiomy
 Parasite2 <- tax_glom(Parasite, "Genus")
 Parasite2
 
-do_Models <- FALSE
+do_Models <- TRUE
 
 if (do_Models){## we want to add genetic mum and surrogate mum, in the future this
 #############################################################################
 ############# let's do dyad comparisons now
-sample_data(PMS)$key <- paste(sample_data(PMS)$hyena_ID,
+    sample_data(PMS)$key <- paste(sample_data(PMS)$hyena_ID,
                               sample_data(PMS)$Sample, sep="_")
 key <- data.frame(ID=sample_data(PMS)$key)
 metadt <- sample_data(PMS)
@@ -435,8 +435,8 @@ data.dyad$IDB_s<-list$Var1
 data.dyad$IDA <- gsub("_.*", "", data.dyad$IDA_s)
 data.dyad$IDB <- gsub("_.*", "", data.dyad$IDB_s)
 
-# Make sure you have got rid of all self comparisons
-data.dyad<-data.dyad[which(data.dyad$IDA!=data.dyad$IDB),]
+# We keep intra individual comparisons (not the same sample!!)
+#data.dyad<-data.dyad[which(data.dyad$IDA!=data.dyad$IDB),]
 
 ######################### Now we model the data ####################
 #scale all predictors to range between 0-1 if they are not already naturally on that scale
@@ -458,6 +458,7 @@ for(i in 1:ncol(data.dyad[,which(colnames(data.dyad)%in%scalecols)])){
     data.dyad[,which(colnames(data.dyad)%in%scalecols)][,i]<-
         range.use(data.dyad[,which(colnames(data.dyad)%in%scalecols)][,i],0,1)
 }
+    
 ### Multivariate model for Parasite, Fungi and Bacteria
 bformJ <- bf(mvbind(Fungi_J, Parasite_J, Bacteria_J)~1+ IgAP+ MucinP + Age+  Rank+ Gen_mum+
                 Temporal+ Clan+Age:IgAP+Age:MucinP+
@@ -561,16 +562,18 @@ modelPA <- brm(Parasite_A ~1 + IgAP+ MucinP + Age+  Rank+ Gen_mum+
                 inits=0)
 saveRDS(modelPA, "tmp/modelPA.rds")
 
+
+    
 saveRDS(data.dyad, "tmp/data.dyad.rds")
 } else
     data.dyad <- readRDS("tmp/data.dyad.rds")
 
 modelJ_FPB <- readRDS("tmp/modelJ_FPB.rds")
 modelA_FPB <- readRDS("tmp/modelA_FPB.rds")
-#modelA <- readRDS("tmp/modelA.rds")
-#modelJ <- readRDS("tmp/modelJ.rds")
-model_intJ <- readRDS("tmp/model_intJ.rds")
-model_intA <- readRDS("tmp/model_intA.rds")
+modelA <- readRDS("tmp/modelA.rds")
+modelJ <- readRDS("tmp/modelJ.rds")
+#model_intJ <- readRDS("tmp/model_intJ.rds")
+#model_intA <- readRDS("tmp/model_intA.rds")
 modelFA <- readRDS("tmp/modelFA.rds")
 modelFJ <- readRDS("tmp/modelFJ.rds")
 modelBJ <- readRDS("tmp/modelBJ.rds")
@@ -840,6 +843,8 @@ ggplot2::ggsave(file="Figures/Figure3.pdf", Parasite_immune, width = 190, height
 
 library(caret)
 library(ranger)
+library(pdp)
+library(patchwork)
 
 otu <- PMS@otu_table
 
@@ -891,33 +896,38 @@ topImp <- ggplot(imp20, aes(y=taxa, x=Overall))+
     labs(x="importance", y="")+
     theme_classic()
 
-plot_grid(corr, topImp, labels="auto")
+Fig4 <- plot_grid(corr, topImp, labels="auto", rel_widths=c(0.6, 1))
 
-library(patchwork)
+ggplot2::ggsave(file="Figures/Figure4.pdf", Fig4, width = 200, height = 90, dpi = 300, units="mm")
 
-library(patchwork)
 
-library(pdp)
 
 #devtools::install_github("bgreenwell/pdp")
 
-partial(rfFit1, pred.var = top_features[], rug = TRUE)
+top_features <- imp20$taxa
 
-top_features <- imp20$taxa[1:10]
 pd_plots <- list(NULL)
-for (feature in 1:length(top_features)) {
-    pd_plots[[feature]] <- partial(rfFit1, pred.var = top_features[feature], rug = TRUE) %>% autoplot() +
-        geom_hline(yintercept = mean(IgA_df_train$IgA), linetype = 2, color = "gray") + # Show the mean of the training data as a dashed line
+
+top_features <- as.character(top_features)
+
+for (a in 1:length(top_features)) {
+    pd_plots[[a]] <-pdp::partial(rfFit1, pred.var=top_features[a], rug=TRUE)%>%
+        autoplot()+
+        geom_hline(yintercept = mean(IgA_df_train$IgA), linetype = 2, color = "gray") + 
 #            scale_y_continuous(limits=c(1.5,2.3)) + # Harmonize the scale of yhat on all plots
         theme(panel.border = element_rect(colour = "black", fill = NA),
                       panel.background = element_blank())
-    print(paste0("Partial dependence of ", top_features[feature]))
+    print(paste0("Partial dependence of ", top_features[a]))
 }
 
+fig4_2 <- wrap_plots(pd_plots, ncol=4)
+
+fig4 <- plot_grid(Fig4, fig4_2, nrow=2, rel_heights=c(0.5, 1))
+
+ggplot2::ggsave(file="Figures/Figure5.pdf", fig4, width = 200, height = 250, dpi = 300, units="mm")
 
 
 #plot(varImp(rfFit1))
-
 
 
 #####################################################################
