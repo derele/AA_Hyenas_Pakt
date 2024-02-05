@@ -585,20 +585,71 @@ modelPA <- readRDS("tmp/modelPA.rds")
 print(summary(modelJ), digits=3)
 
 print(summary(modelA), digits=3)
+
 print(summary(modelFJ), digits=3)
+
 print(summary(modelPJ), digits=3)
+
 print(summary(modelBJ), digits=3)
-print(summary(modelJ), digits=3)
-print(summary(modelPA), digits=3)
+
 print(summary(modelFA), digits=3)
+
+print(summary(modelPA), digits=3)
+
 print(summary(modelBA), digits=3)
 
-print(summary(modelA), digits=3)
-
-print(summary(modelJ_FPB), digits=3)
-print(summary(modelA_FPB), digits=3)
+print(summary(modelJ_FPB), digits=3) # same as individual models but with autcorr between dependent variables
+print(summary(modelA_FPB), digits=3) # same as individual models but with autcorr between dependent variables
 
 ############################# plotting
+#stil figuring out which is the best vizualizing approach
+
+Parasite
+Fungi
+Bacteria
+PMS
+
+
+para <- summary(modelJ)$fixed
+
+para
+
+name <- "Overall"
+
+res.fun <- function(modelJ, name){
+    para <- summary(modelJ)$fixed
+    data.frame(Domain=rep(name, 10),
+               Effect=rownames(para),
+               Estimate=para$Estimate,
+               lCI=para$'l-95% CI',
+               uCI=para$'u-95% CI')
+}
+
+    
+res <- res.fun(modelJ, "Overall")    
+res <- rbind(res, res.fun(modelPJ, "Parasites"))
+res <- rbind(res, res.fun(modelFJ, "Fungi"))
+res <- rbind(res, res.fun(modelBJ, "Bacteria"))
+
+res$Domain <- factor(res$Domain, levels=c("Bacteria", "Fungi", "Parasites", "Overall"))
+
+res <- res[res$Effect%in%c("Age", "IgAP", "MucinP"),]
+
+coul=c("#F8B195","#F67280", "#6C5B7B", "#355C7D")
+
+ggplot(res, aes(x = Estimate, y = Effect, fill = Effect)) +
+    geom_errorbar(aes(xmin=lCI, xmax=uCI, colour=Effect), size=1, width=0.4)+
+    geom_point(shape = 21, size=3) +
+    scale_fill_manual(values = coul) +
+    scale_colour_manual(values = coul) +
+    xlab("Parameter estimate") +
+    ylab("") +
+    scale_y_discrete(labels = c("Age dist", "f-IgA dist", "f-mucin dist")) +
+    geom_vline(xintercept=0, linetype="dashed", linewidth=1)+
+    facet_grid(Domain ~ ., scales = "free_y", space = "free_y")+
+    theme_classic()+
+    theme(legend.position="none")
+
 resdf.fun<- function(modelJ, name){
     para <- summary(modelJ)$fixed
     data.frame(Domain=name,
@@ -793,8 +844,8 @@ newdata0 <- data.frame(IgAP=seq_range(0:1, n=51),
                        Gen_mum=rep(0, n=51),
                        Temporal=rep(0, n=51),
                        Rank=rep(median(data.dyad$Rank)))
-pred.df0 <- add_epred_draws(newdata0, modelPA)
-pred.df1 <- add_epred_draws(newdata1, modelPA)
+pred.df0 <- add_epred_draws(newdata0, modelPJ)
+pred.df1 <- add_epred_draws(newdata1, modelPJ)
 
 
 pred.df <- rbind(pred.df0, pred.df1)
@@ -806,6 +857,20 @@ IgA_Parasite <-    ggplot(pred.df, aes(x=IgAP, y=.epred, group=Age))+
     xlab("faecal IgA distances")+
     theme_classic()
 
+pred.df0B <- add_epred_draws(newdata0, modelBJ)
+pred.df1B <- add_epred_draws(newdata1, modelBJ)
+
+pred.dfB <- rbind(pred.df0B, pred.df1B)
+pred.dfB$Age <- as.factor(pred.dfB$Age)
+
+IgA_Bacteria <-    ggplot(pred.dfB, aes(x=IgAP, y=.epred, group=Age))+
+    stat_lineribbon(size=0.5, .width=c(.95, .8, .5), alpha=0.5)+
+    ylab("Bacteria community similarity")+
+    xlab("faecal IgA distances")+
+    theme_classic()
+
+
+ab <- plot_grid(IgA_Parasite, IgA_Bacteria, labels="auto")
 
 newdata1M <- data.frame(MucinP=seq_range(0:1, n=51),
                        IgAP=rep(median(data.dyad$IgAP), n=51),
@@ -825,6 +890,7 @@ newdata0M <- data.frame(MucinP=seq_range(0:1, n=51),
                        Gen_mum=rep(0, n=51),
                        Temporal=rep(0, n=51),
                        Rank=rep(median(data.dyad$Rank)))
+
 pred.df0M <- add_epred_draws(newdata0M, modelPA)
 pred.df1M <- add_epred_draws(newdata1M, modelPA)
 pred.dfM <- rbind(pred.df0M, pred.df1M)
@@ -837,8 +903,22 @@ Mucin_Parasite <- ggplot(pred.dfM, aes(x=MucinP, y=.epred, group=Age))+
     xlab("faecal mucin distances")+
     theme_classic()
 
-Parasite_immune <- plot_grid(IgA_Parasite, Mucin_Parasite, labels="auto")
-ggplot2::ggsave(file="Figures/Figure3.pdf", Parasite_immune, width = 190, height = 140, dpi = 300, units="mm")
+pred.df0MF <- add_epred_draws(newdata0M, modelFA)
+pred.df1MF <- add_epred_draws(newdata1M, modelFA)
+pred.dfMF <- rbind(pred.df0MF, pred.df1MF)
+pred.dfMF$Age <- as.factor(pred.dfMF$Age)
+
+Mucin_Fungi <- ggplot(pred.dfMF, aes(x=MucinP, y=.epred, group=Age))+
+    stat_lineribbon(size=0.5, .width=c(.95, .8, .5), alpha=0.5)+
+    ylab("Fungi community similarity")+
+    xlab("faecal mucin distances")+
+    theme_classic()
+
+cd <- plot_grid(Mucin_Parasite, Mucin_Fungi, labels=c("c", "d"))
+
+Fig3 <- plot_grid(ab, cd, nrow=1)
+
+ggplot2::ggsave(file="Figures/Figure3.pdf", Fig3, width = 190, height = 140, dpi = 300, units="mm")
 
 #############################
 # random forest regression
@@ -900,9 +980,6 @@ topImp <- ggplot(imp20, aes(y=taxa, x=Overall))+
 
 Fig4 <- plot_grid(corr, topImp, labels="auto", rel_widths=c(0.6, 1))
 
-ggplot2::ggsave(file="Figures/Figure4.pdf", Fig4, width = 200, height = 90, dpi = 300, units="mm")
-
-
 top_features <- imp20$taxa
 
 pd_plots <- list(NULL)
@@ -920,10 +997,8 @@ for (a in 1:length(top_features)) {
 }
 
 fig4_2 <- wrap_plots(pd_plots, ncol=4)
-
 fig4 <- plot_grid(Fig4, fig4_2, nrow=2, rel_heights=c(0.5, 1))
-
-ggplot2::ggsave(file="Figures/Figure5.pdf", fig4, width = 200, height = 250, dpi = 300, units="mm")
+ggplot2::ggsave(file="Figures/Figure4.pdf", fig4, width = 200, height = 250, dpi = 300, units="mm")
 
 
 #plot(varImp(rfFit1))
@@ -995,9 +1070,7 @@ for (a in 1:length(top_features)) {
 }
 
 fig5_2 <- wrap_plots(pd_plots, ncol=4)
-
 fig5 <- plot_grid(Fig5, fig5_2, nrow=2, rel_heights=c(0.5, 1))
-
 ggplot2::ggsave(file="Figures/Figure5.pdf", fig5, width = 200, height = 250, dpi = 300, units="mm")
 
 
