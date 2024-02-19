@@ -12,6 +12,7 @@ library(Matrix)
 library(SpiecEasi)
 library(microbiome)
 library(brms)
+library(ggpmisc)
 
 PMS <- readRDS("/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/fPMS.rds")
 PMS <- prune_taxa(taxa_sums(PMS)>0, PMS)
@@ -844,33 +845,47 @@ newdata0 <- data.frame(IgAP=seq_range(0:1, n=51),
                        Gen_mum=rep(0, n=51),
                        Temporal=rep(0, n=51),
                        Rank=rep(median(data.dyad$Rank)))
-pred.df0 <- add_epred_draws(newdata0, modelPJ)
-pred.df1 <- add_epred_draws(newdata1, modelPJ)
 
+pred.df0 <- add_epred_draws(newdata0, modelJ)
+pred.df1 <- add_epred_draws(newdata1, modelJ)
 
 pred.df <- rbind(pred.df0, pred.df1)
 pred.df$Age <- as.factor(pred.df$Age)
 
-IgA_Parasite <-    ggplot(pred.df, aes(x=IgAP, y=.epred, group=Age))+
+IgA_J <- ggplot(pred.df, aes(x=IgAP, y=.epred, group=Age))+
     stat_lineribbon(size=0.5, .width=c(.95, .8, .5), alpha=0.5)+
-    ylab("Parasite community similarity")+
+    ylab("Overall community (Jaccard) similarity")+
     xlab("faecal IgA distances")+
     theme_classic()
 
-pred.df0B <- add_epred_draws(newdata0, modelBJ)
-pred.df1B <- add_epred_draws(newdata1, modelBJ)
+pred.df0A <- add_epred_draws(newdata0, modelA)
+pred.df1A <- add_epred_draws(newdata1, modelA)
 
-pred.dfB <- rbind(pred.df0B, pred.df1B)
-pred.dfB$Age <- as.factor(pred.dfB$Age)
+pred.dfA <- rbind(pred.df0A, pred.df1A)
+pred.dfA$Age <- as.factor(pred.dfA$Age)
 
-IgA_Bacteria <-    ggplot(pred.dfB, aes(x=IgAP, y=.epred, group=Age))+
+IgA_A <-    ggplot(pred.dfA, aes(x=IgAP, y=.epred, group=Age))+
     stat_lineribbon(size=0.5, .width=c(.95, .8, .5), alpha=0.5)+
-    ylab("Bacteria community similarity")+
+    ylab("Overall community  (Aitchison) similarity")+
+    xlab("faecal IgA distances")+
+    theme_classic()
+
+pred.df0FA <- add_epred_draws(newdata0, modelFA)
+pred.df1FA <- add_epred_draws(newdata1, modelFA)
+
+pred.dfFA <- rbind(pred.df0FA, pred.df1FA)
+pred.dfFA$Age <- as.factor(pred.dfFA$Age)
+
+IgA_FA <-    ggplot(pred.dfFA, aes(x=IgAP, y=.epred, group=Age))+
+    stat_lineribbon(size=0.5, .width=c(.95, .8, .5), alpha=0.5)+
+    ylab("Fungi community  (Aitchison) similarity")+
     xlab("faecal IgA distances")+
     theme_classic()
 
 
-ab <- plot_grid(IgA_Parasite, IgA_Bacteria, labels="auto")
+ab <- plot_grid(IgA_J, IgA_A, labels="auto")
+ggplot2::ggsave(file="Figures/Figure3.pdf", ab, width = 190, height = 140, dpi = 300, units="mm")
+
 
 newdata1M <- data.frame(MucinP=seq_range(0:1, n=51),
                        IgAP=rep(median(data.dyad$IgAP), n=51),
@@ -916,9 +931,6 @@ Mucin_Fungi <- ggplot(pred.dfMF, aes(x=MucinP, y=.epred, group=Age))+
 
 cd <- plot_grid(Mucin_Parasite, Mucin_Fungi, labels=c("c", "d"))
 
-Fig3 <- plot_grid(ab, cd, nrow=1)
-
-ggplot2::ggsave(file="Figures/Figure3.pdf", Fig3, width = 190, height = 140, dpi = 300, units="mm")
 
 #############################
 # random forest regression
@@ -931,23 +943,45 @@ library(patchwork)
 PMS.t <- transform(PMS, "compositional") # transform to make all taxa from 0 to 1
 otu <- PMS.t@otu_table
 
-colnames(otu) <- paste("ASV", seq(1, length(colnames(otu))), PMS@tax_table[,6], sep="_")
+colnames(otu) <- paste("ASV", seq(1, length(colnames(otu))), PMS.t@tax_table[,6], sep="_")
 df <- data.frame(otu, IgA=PMS.t@sam_data$IgA_inputed)
 df$IgA <- log(df$IgA)
 
-set.seed(56)
+set.seed(123)
 trainIndex <- createDataPartition(df$IgA, p=0.8, list=FALSE, times=1)
 IgA_df_train <- df[trainIndex,]
 IgA_df_test <- df[-trainIndex,]
 
-set.seed(12)
+# Pre-process
+#preProc <- preProcess(df, method = c('center', 'scale'))
+#df.preProcessed <- predict(preProc, df)
+#df.preProcessed.train <- df.preProcessed[trainIndex,]
+#tt.preProcessed.test <- df.preProcessed[-trainIndex,]
+
+tgrid <- expand.grid(
+    mtry = 1:ncol(otu),
+    splitrule = "variance",
+    min.node.size = c(5, 10))
+
+
+library(doParallel)
+set.seed(123)
 fitControl <- trainControl(method="repeatedcv", number=10, repeats=10)
 
+doIgARF <- FALSE
+if (doIgARF){
+set.seed(123)
+cl <- makePSOCKcluster(20)
+registerDoParallel(cl)
 rfFit1 <- train(IgA~., data=IgA_df_train,
                 method="ranger",
                 trControl=fitControl,
+                tuneGrid = tgrid,
                 importance="permutation")
-
+stopCluster(cl)
+saveRDS(rfFit1, "tmp/rfFit_IgA.rds")
+} else
+    rfFit <- readRDS("tmp/rfFit_IgA.rds")
 
 print(rfFit1)
 print(rfFit1$finalModel)
@@ -957,9 +991,12 @@ test_predictions <- predict(rfFit1, newdata=IgA_df_test)
 print(postResample(test_predictions, IgA_df_test$IgA))
 
 pred_obs <- data.frame(predicted=test_predictions, observed=IgA_df_test$IgA)
+cor.test(pred_obs$predicted, pred_obs$observed, method="spearman")
 
-corr <- ggplot(pred_obs, aes(x=predicted, y=observed))+
+corr <-ggplot(pred_obs, aes(x=predicted, y=observed))+
     geom_point(size=3, color="orange")+
+    stat_poly_line() +
+    stat_poly_eq() +
     geom_abline(linetype=5, color="blue", size=1)+
     theme_classic()
 
@@ -971,19 +1008,23 @@ imp <- imp[order(-imp$Overall),]
 imp20 <- imp[1:20,]
 imp20 <- droplevels(imp20)
 imp20$taxa <- with(imp20, reorder(taxa, Overall))
+#save to table
 
-topImp <- ggplot(imp20, aes(y=taxa, x=Overall))+
+
+IgAt <- data.frame(seq=taxa_names(PMS)[as.numeric(rownames(imp20))], name=imp20$taxa, importance=imp20$Overall)
+write.csv2(IgAt, "tmp/IgAtop20.csv")
+write.fasta(as.list(IgAt$seq), IgAt$name, "tmp/IgAtop20.fasta")
+
+topImp <-
+    ggplot(imp20, aes(y=taxa, x=Overall))+
     geom_segment( aes(yend=taxa, xend=0)) +
     geom_point(size=4, color="orange")+
     labs(x="importance", y="")+
     theme_classic()
 
 Fig4 <- plot_grid(corr, topImp, labels="auto", rel_widths=c(0.6, 1))
-
 top_features <- imp20$taxa
-
 pd_plots <- list(NULL)
-
 top_features <- as.character(top_features)
 
 for (a in 1:length(top_features)) {
@@ -1001,26 +1042,31 @@ fig4 <- plot_grid(Fig4, fig4_2, nrow=2, rel_heights=c(0.5, 1))
 ggplot2::ggsave(file="Figures/Figure4.pdf", fig4, width = 200, height = 250, dpi = 300, units="mm")
 
 
-#plot(varImp(rfFit1))
-
-
 # for mucin
 df <- data.frame(otu, Mucin=PMS.t@sam_data$mucin_inputed)
 df$Mucin <- log(df$Mucin)
 
-set.seed(57)
+set.seed(123)
 trainIndex <- createDataPartition(df$Mucin, p=0.8, list=FALSE, times=1)
 Mucin_df_train <- df[trainIndex,]
 Mucin_df_test <- df[-trainIndex,]
 
-set.seed(13)
+doMucinRF <- FALSE
+if (doMucinRF){
+set.seed(123)
 fitControl <- trainControl(method="repeatedcv", number=10, repeats=10)
-
+cl <- makePSOCKcluster(20)
+registerDoParallel(cl)
 rfFitM <- train(Mucin~., data=Mucin_df_train,
                 method="ranger",
+                tuneGrid = tgrid,
                 trControl=fitControl,
                 importance="permutation")
 
+stopCluster(cl)
+saveRDS(rfFitM, "tmp/rfFit_mucin.rds")
+} else
+    rfFitM <- readRDS("tmp/rfFit_mucin.rds")
 
 print(rfFitM)
 print(rfFitM$finalModel)
@@ -1028,12 +1074,16 @@ print(rfFitM$finalModel)
 
 test_predictions <- predict(rfFitM, newdata=Mucin_df_test)
 print(postResample(test_predictions, Mucin_df_test$Mucin))
-
 pred_obs <- data.frame(predicted=test_predictions, observed=Mucin_df_test$Mucin)
+cor.test(pred_obs$predicted, pred_obs$observed, method="spearman")
 
-corrM <- ggplot(pred_obs, aes(x=predicted, y=observed))+
+corrM <- 
+    ggplot(pred_obs, aes(x=predicted, y=observed))+
     geom_point(size=3, color="orange")+
     geom_abline(linetype=5, color="blue", size=1)+
+    stat_poly_line() +
+        stat_poly_eq() +
+#    stat_smooth(method="lm", formula=y~x, geom="smooth")+
     theme_classic()
 
 impM <- varImp(rfFitM)
@@ -1044,6 +1094,14 @@ impM <- impM[order(-impM$Overall),]
 impM20 <- impM[1:20,]
 impM20 <- droplevels(impM20)
 impM20$taxa <- with(impM20, reorder(taxa, Overall))
+
+#save to table
+mucint <- data.frame(seq=taxa_names(PMS)[as.numeric(rownames(impM20))], name=impM20$taxa, importance=impM20$Overall)
+write.csv2(mucint, "tmp/mucintop20.csv")
+
+library(seqinr)
+
+write.fasta(mucint$seq, mucint$name, "tmp/mucintop20.fasta")
 
 topMImp <- ggplot(impM20, aes(y=taxa, x=Overall))+
     geom_segment( aes(yend=taxa, xend=0)) +
@@ -1073,6 +1131,26 @@ fig5_2 <- wrap_plots(pd_plots, ncol=4)
 fig5 <- plot_grid(Fig5, fig5_2, nrow=2, rel_heights=c(0.5, 1))
 ggplot2::ggsave(file="Figures/Figure5.pdf", fig5, width = 200, height = 250, dpi = 300, units="mm")
 
+# for age
+df <- data.frame(otu, Age=PMS.t@sam_data$age_sampling)
+
+set.seed(123)
+trainIndex <- createDataPartition(df$Age, p=0.8, list=FALSE, times=1)
+Age_df_train <- df[trainIndex,]
+Age_df_test <- df[-trainIndex,]
+
+set.seed(123)
+fitControl <- trainControl(method="repeatedcv", number=10, repeats=10)
+cl <- makePSOCKcluster(10)
+registerDoParallel(cl)
+
+rfFitA <- train(Age~., data=Age_df_train,
+                method="ranger",
+                tuneGrid = tgrid,
+                trControl=fitControl,
+                importance="permutation")
+
+stopCluster(cl)
 
 
 #####################################################################
