@@ -263,7 +263,7 @@ Fungi <- subset_taxa(PMS, Phylum %in% c("Mucoromycota", "Ascomycota", "Basidiomy
 Parasite2 <- tax_glom(Parasite, "Genus")
 Parasite2
 
-do_Models <- TRUE
+do_Models <- FALSE
 
 if (do_Models){## we want to add genetic mum and surrogate mum, in the future this
 #############################################################################
@@ -562,8 +562,6 @@ modelPA <- brm(Parasite_A ~1 + IgAP+ MucinP + Age+  Rank+ Gen_mum+
                 cores = 20, chains = 4,
                 inits=0)
 saveRDS(modelPA, "tmp/modelPA.rds")
-
-
     
 saveRDS(data.dyad, "tmp/data.dyad.rds")
 } else
@@ -613,10 +611,6 @@ PMS
 
 para <- summary(modelJ)$fixed
 
-para
-
-name <- "Overall"
-
 res.fun <- function(modelJ, name){
     para <- summary(modelJ)$fixed
     data.frame(Domain=rep(name, 10),
@@ -641,8 +635,8 @@ coul=c("#F8B195","#F67280", "#6C5B7B", "#355C7D")
 ggplot(res, aes(x = Estimate, y = Effect, fill = Effect)) +
     geom_errorbar(aes(xmin=lCI, xmax=uCI, colour=Effect), size=1, width=0.4)+
     geom_point(shape = 21, size=3) +
-    scale_fill_manual(values = coul) +
-    scale_colour_manual(values = coul) +
+ #   scale_fill_manual(values = coul) +
+#    scale_colour_manual(values = coul) +
     xlab("Parameter estimate") +
     ylab("") +
     scale_y_discrete(labels = c("Age dist", "f-IgA dist", "f-mucin dist")) +
@@ -818,8 +812,61 @@ Clan1<-ggplot(res.df, aes(x=Clan1_Estimate, y=Domain, colour=Domain))+
     theme_classic(base_size=12)+
     theme(legend.position = "none")
 
+RankA<-ggplot(res.dfA, aes(x=Rank_Estimate, y=Domain, colour=Domain))+
+    geom_vline(xintercept=0, linetype="dashed", linewidth=1)+
+    geom_errorbar(aes(xmin=Rank_lCI, xmax=Rank_uCI, colour=Domain),
+                  size=1, width=0.4)+
+    geom_point(size=3)+
+#    scale_x_reverse()+
+   scale_colour_manual(values=coul)+
+#    scale_discrete_vi()+
+    labs(x="Social rank distance", y="")+
+    theme_classic(base_size=12)+
+    theme(legend.position = "none")
+
+Gen_MumA<-ggplot(res.dfA, aes(x=Gen_mum1_Estimate, y=Domain, colour=Domain))+
+    geom_vline(xintercept=0, linetype="dashed", linewidth=1)+
+    geom_errorbar(aes(xmin=Gen_mum1_lCI, xmax=Gen_mum1_uCI, colour=Domain),
+                  size=1, width=0.4)+
+    geom_point(size=3)+
+#    scale_x_reverse()+
+   scale_colour_manual(values=coul)+
+#    scale_discrete_vi()+
+    labs(x="Same genetic mother", y="")+
+    theme_classic(base_size=12)+
+    theme(legend.position = "none")
+
+TemporalA<-ggplot(res.dfA, aes(x=Temporal_Estimate, y=Domain, colour=Domain))+
+    geom_vline(xintercept=0, linetype="dashed", linewidth=1)+
+    geom_errorbar(aes(xmin=Temporal_lCI, xmax=Temporal_uCI, colour=Domain),
+                  size=1, width=0.4)+
+    geom_point(size=3)+
+#    scale_x_reverse()+
+   scale_colour_manual(values=coul)+
+#    scale_discrete_vi()+
+    labs(x="Temporal distance", y="")+
+    theme_classic(base_size=12)+
+    theme(legend.position = "none")
+
+Clan1A<-ggplot(res.dfA, aes(x=Clan1_Estimate, y=Domain, colour=Domain))+
+    geom_vline(xintercept=0, linetype="dashed", linewidth=1)+
+    geom_errorbar(aes(xmin=Clan1_lCI, xmax=Clan1_uCI, colour=Domain),
+                  size=1, width=0.4)+
+    geom_point(size=3)+
+#    scale_x_reverse()+
+   scale_colour_manual(values=coul)+
+#    scale_discrete_vi()+
+    labs(x="Same clan", y="")+
+    theme_classic(base_size=12)+
+    theme(legend.position = "none")
+
+
 Figure2 <- plot_grid(IgA, IgAA, Mucin, MucinA, Age, AgeA, labels="auto", ncol=2)
 ggplot2::ggsave(file="Figures/Figure2.pdf", Figure2, width = 190, height = 150, dpi = 300, units="mm")
+
+
+Figure_SS <- plot_grid(Rank, RankA, Gen_Mum, Gen_MumA, Temporal, TemporalA, Clan1, Clan1A, labels="auto", ncol=2)
+ggplot2::ggsave(file="Figures/forPres_SS.pdf", Figure_SS, width = 190, height = 170, dpi = 300, units="mm")
 
 # interaction
 library(tidyr)
@@ -934,7 +981,6 @@ cd <- plot_grid(Mucin_Parasite, Mucin_Fungi, labels=c("c", "d"))
 
 #############################
 # random forest regression
-
 library(caret)
 library(ranger)
 library(pdp)
@@ -965,6 +1011,8 @@ tgrid <- expand.grid(
 
 
 library(doParallel)
+library(seqinr)
+
 set.seed(123)
 fitControl <- trainControl(method="repeatedcv", number=10, repeats=10)
 
@@ -973,6 +1021,7 @@ if (doIgARF){
 set.seed(123)
 cl <- makePSOCKcluster(20)
 registerDoParallel(cl)
+
 rfFit1 <- train(IgA~., data=IgA_df_train,
                 method="ranger",
                 trControl=fitControl,
@@ -981,7 +1030,7 @@ rfFit1 <- train(IgA~., data=IgA_df_train,
 stopCluster(cl)
 saveRDS(rfFit1, "tmp/rfFit_IgA.rds")
 } else
-    rfFit <- readRDS("tmp/rfFit_IgA.rds")
+    rfFit1 <- readRDS("tmp/rfFit_IgA.rds")
 
 print(rfFit1)
 print(rfFit1$finalModel)
@@ -1008,8 +1057,10 @@ imp <- imp[order(-imp$Overall),]
 imp20 <- imp[1:20,]
 imp20 <- droplevels(imp20)
 imp20$taxa <- with(imp20, reorder(taxa, Overall))
-#save to table
-
+imp40 <- imp[21:40,]
+imp40 <- droplevels(imp40)
+imp40$taxa <- with(imp40, reorder(taxa, Overall))
+# save to table
 
 IgAt <- data.frame(seq=taxa_names(PMS)[as.numeric(rownames(imp20))], name=imp20$taxa, importance=imp20$Overall)
 write.csv2(IgAt, "tmp/IgAtop20.csv")
@@ -1022,7 +1073,15 @@ topImp <-
     labs(x="importance", y="")+
     theme_classic()
 
+topImp40 <-
+    ggplot(imp40, aes(y=taxa, x=Overall))+
+    geom_segment( aes(yend=taxa, xend=0)) +
+    geom_point(size=4, color="orange")+
+    labs(x="importance", y="")+
+    theme_classic()
+
 Fig4 <- plot_grid(corr, topImp, labels="auto", rel_widths=c(0.6, 1))
+
 top_features <- imp20$taxa
 pd_plots <- list(NULL)
 top_features <- as.character(top_features)
@@ -1040,6 +1099,24 @@ for (a in 1:length(top_features)) {
 fig4_2 <- wrap_plots(pd_plots, ncol=4)
 fig4 <- plot_grid(Fig4, fig4_2, nrow=2, rel_heights=c(0.5, 1))
 ggplot2::ggsave(file="Figures/Figure4.pdf", fig4, width = 200, height = 250, dpi = 300, units="mm")
+
+top_features40 <- imp40$taxa
+pd_plots <- list(NULL)
+top_features40 <- as.character(top_features40)
+
+for (a in 1:length(top_features40)) {
+    pd_plots[[a]] <-pdp::partial(rfFit1, pred.var=top_features40[a], rug=TRUE)%>%
+        autoplot()+
+        geom_hline(yintercept = mean(IgA_df_train$IgA), linetype = 2, color = "gray") + 
+#            scale_y_continuous(limits=c(1.5,2.3)) + # Harmonize the scale of yhat on all plots
+        theme(panel.border = element_rect(colour = "black", fill = NA),
+                      panel.background = element_blank())
+    print(paste0("Partial dependence of ", top_features40[a]))
+}
+
+figS2_i <- wrap_plots(pd_plots, ncol=4)
+fS2_i <- plot_grid(topImp40, figS2_i, nrow=2, rel_heights=c(0.5, 1))
+ggplot2::ggsave(file="Figures/FigureS2_IgA.pdf", fS2_i, width = 200, height = 250, dpi = 300, units="mm")
 
 
 # for mucin
@@ -1095,28 +1172,32 @@ impM20 <- impM[1:20,]
 impM20 <- droplevels(impM20)
 impM20$taxa <- with(impM20, reorder(taxa, Overall))
 
+impM40 <- impM[21:40,]
+impM40 <- droplevels(impM40)
+#impM40$taxa <- with(impM40, reorder(taxa, Overall))
+
+
 #save to table
 mucint <- data.frame(seq=taxa_names(PMS)[as.numeric(rownames(impM20))], name=impM20$taxa, importance=impM20$Overall)
 write.csv2(mucint, "tmp/mucintop20.csv")
 
-library(seqinr)
+mucint <- data.frame(seq=taxa_names(PMS)[as.numeric(rownames(impM40))], name=impM40$taxa, importance=impM40$Overall)
+write.csv2(mucint, "tmp/mucintop40.csv")
+
+
+
 
 write.fasta(mucint$seq, mucint$name, "tmp/mucintop20.fasta")
-
 topMImp <- ggplot(impM20, aes(y=taxa, x=Overall))+
     geom_segment( aes(yend=taxa, xend=0)) +
     geom_point(size=4, color="orange")+
     labs(x="importance", y="")+
     theme_classic()
-
 Fig5 <- plot_grid(corrM, topMImp, labels="auto", rel_widths=c(0.6, 1))
 
 top_features <- impM20$taxa
-
 pd_plots <- list(NULL)
-
 top_features <- as.character(top_features)
-
 for (a in 1:length(top_features)) {
     pd_plots[[a]] <-pdp::partial(rfFitM, pred.var=top_features[a], rug=TRUE)%>%
         autoplot()+
@@ -1130,6 +1211,32 @@ for (a in 1:length(top_features)) {
 fig5_2 <- wrap_plots(pd_plots, ncol=4)
 fig5 <- plot_grid(Fig5, fig5_2, nrow=2, rel_heights=c(0.5, 1))
 ggplot2::ggsave(file="Figures/Figure5.pdf", fig5, width = 200, height = 250, dpi = 300, units="mm")
+
+impM40$taxa <- with(impM40, reorder(taxa, Overall))
+topMImp40 <- ggplot(impM40, aes(y=taxa, x=Overall))+
+    geom_segment( aes(yend=taxa, xend=0)) +
+    geom_point(size=4, color="orange")+
+    labs(x="importance", y="")+
+    theme_classic()
+topMImp40
+
+top_features40 <- impM40$taxa
+pd_plots <- list(NULL)
+top_features <- as.character(top_features40)
+for (a in 1:length(top_features40)) {
+    pd_plots[[a]] <-pdp::partial(rfFitM, pred.var=top_features40[a], rug=TRUE)%>%
+        autoplot()+
+        geom_hline(yintercept = mean(Mucin_df_train$Mucin), linetype = 2, color = "gray") + 
+#            scale_y_continuous(limits=c(1.5,2.3)) + # Harmonize the scale of yhat on all plots
+        theme(panel.border = element_rect(colour = "black", fill = NA),
+                      panel.background = element_blank())
+    print(paste0("Partial dependence of ", top_features40[a]))
+}
+
+figS2 <- wrap_plots(pd_plots, ncol=4)
+fS2 <- plot_grid(topMImp40, figS2, nrow=2, rel_heights=c(0.5, 1))
+ggplot2::ggsave(file="Figures/FigureS_mucin.pdf", fS2, width = 200, height = 250, dpi = 300, units="mm")
+
 
 # for age
 df <- data.frame(otu, Age=PMS.t@sam_data$age_sampling)

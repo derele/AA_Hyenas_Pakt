@@ -1,0 +1,250 @@
+otu <- otu_table(PMS)
+colnames(otu) <- as.vector(tax_table(PMS)[,"Genus"])
+mds <- vegan::metaMDS(otu, try=350, k=3)
+#plot(mds)
+
+df <- PMS@sam_data
+class(df) <- "data.frame"
+cplot(mds)
+names(df)
+
+ordiplot(mds, type="n")
+orditorp(mds, display="species", col="red", air=0.01)
+orditorp(mds, display="sites")
+
+mds.fit <- envfit(mds~fGCM+IgA+IgG+mucin+age_sampling+ CSocialRank+ season+ sex + Survival_Ad + hyena_ID + age_death + clan + LRS, data=df, na.rm=TRUE)
+
+data.scores <- as.data.frame(vegan::scores(mds)$sites)
+
+all(rownames(data.scores)==rownames(df))
+data.scores <- cbind(data.scores, df[rownames(data.scores),c("fGCM", "IgA", "mucin", "age_sampling", "CSocialRank", "season", "sex", "Survival_Ad", "hyena_ID", "age_death", "clan", "LRS")])
+
+mds.fit$vectors
+
+EnCoord <- as.data.frame(rbind(vegan::scores(mds.fit, "vectors")*
+      ordiArrowMul(mds.fit),
+      vegan::scores(mds.fit, "factors")*
+      ordiArrowMul(mds.fit)))
+
+
+EnCoord$Cat <- ifelse(rownames(EnCoord)%in%c("fGCM", "IgA", "mucin", "age_death", "LRS"), "plot", "notplot")
+
+NMDS_env <-ggplot(data.scores, aes(x=NMDS1, y=NMDS2))+
+        geom_segment(aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
+                    data = subset(EnCoord, Cat=="plot"), size =1, alpha = 0.5) +
+    geom_point(data=data.scores, shape=21, aes(fill=age_sampling), size=3, alpha=0.5)+
+    geom_point(data = subset(EnCoord, Cat=="plot"), aes(x = NMDS1, y = NMDS2),
+                  shape = 4, size = 4, alpha = 0.6)+
+        geom_text(data = subset(EnCoord, Cat=="plot"), aes(x = NMDS1, y = NMDS2+0.04),
+             label = rownames(subset(EnCoord, Cat=="plot")), colour = "red", fontface = "bold")+
+    scale_fill_gradient2(midpoint=365, low="blue", mid="lightblue", high="red", space ="Lab" )+
+    labs(x = "NMDS axis 1", y = "NMDS axis 2", fill = "Age at sampling") +
+    theme_bw(base_size=12)+
+    theme(legend.position = "right",
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          axis.line = element_line(color = "black"),
+          legend.key.size = unit(1.2, "lines"),
+          legend.title = element_text(size = 12, face = "bold"),
+          legend.text = element_text(size = 11),
+          axis.text = element_text(size = 11),
+          axis.title = element_text(size = 12, face = "bold"),
+          plot.title = element_text(size = 14, face = "bold"))
+
+NMDS_env
+
+ggsave("Figures/NMDS_env.pdf", NMDS_env, width=150, height=150, units="mm", dpi=300)
+
+## permanova on juveniles
+## partial least squares regression
+library(caret)
+library(pls)
+
+Juv <-df[df$age_sampling_cat=="sampled_as_juvenile",]
+JPS <- subset_samples(PMS, age_sampling_cat=="sampled_as_juvenile")
+Juv <- Juv[, colnames(Juv)%in%c("age_sampling", "CSocialRank_inputed", "season", "sex", "Survival_Ad", "hyena_ID", "clan")]
+JuvM <- data.frame(otu_table(JPS), Juv)
+JuvM$season <- as.factor(Juv$season)
+JuvM$sex <- as.factor(Juv$sex)
+JuvM$Survival_Ad <- as.factor(Juv$Survival_Ad)
+JuvM$clan <- as.factor(Juv$clan)
+JuvM$hyena_ID <- as.factor(Juv$hyena_ID)
+
+PMS@sam_data$season <- as.factor(PMS@sam_data$season)
+PMS@sam_data$sex <- as.factor(PMS@sam_data$sex)
+PMS@sam_data$Survival_Ad <- as.factor(PMS@sam_data$Survival_Ad)
+PMS@sam_data$clan <- as.factor(PMS@sam_data$clan)
+PMS@sam_data$hyena_ID <- as.factor(PMS@sam_data$hyena_ID)
+
+
+str(sample_data(PMS)$hyena_ID)
+
+set.seed(123)
+training.samples <- sample(sample_names(PMS), size=0.8*nrow(PMS@sam_data))
+
+train.dataPS <- subset_samples(PMS, sample_names(PMS)%in%training.samples)
+test.dataPS <- subset_samples(PMS, !sample_names(PMS)%in%training.samples)
+
+levels(PMS@sam_data$hyena_ID)
+
+train.df <- data.frame(otu_table(train.dataPS), train.dataPS@sam_data[, c("age_sampling", "clan", "sex", "season", "CSocialRank_inputed", "Survival_Ad")])
+
+test.df <- data.frame(otu_table(test.dataPS), test.dataPS@sam_data[, c("age_sampling", "clan", "sex", "season", "CSocialRank_inputed", "Survival_Ad")])
+
+set.seed(123)
+model <- train(
+    age_sampling~., data=train.df, method="pls")
+#    scale=TRUE,
+#    trControl=trainControl("cv", number=10),
+#   tuneLength=10)
+
+model$bestTune
+
+plot(model)
+
+model
+
+tax <- as.data.frame(tax_table(PMS), stringsAsFactors=FALSE)
+model$coefnames <- c(tax$Phylum, model$coefnames[1082:1087])
+imp <- (varImp(model))
+imp <- imp$importance
+imp$names <- c(tax$Phylum, model$coefnames[1082:1087])
+ggplot(imp, aes(Overall, names))+
+    geom_point()
+
+summary(model$finalModel)
+
+# Make predictions
+predictions <- model %>% predict(test.df)
+predictions
+sqrt(mean((test.df$age_sampling - predictions)^2)) # RMSE
+cor(test.df$age_sampling, predictions) ^ 2 # R2
+names(test.df)
+
+
+######################################################
+### Individual repeatability
+library(dplyr)
+samplecount <- data.frame(sample_data(PMS)) %>%
+    group_by(hyena_ID) %>%
+    summarise(NoSamples=n())
+
+sample_data(PMS)$Scount <- "single"
+sample_data(PMS)$Scount[sample_data(PMS)$hyena_ID%in%samplecount$hyena_ID[samplecount$NoSamples>1]] <- "rep"
+
+PMS.r <- subset_samples(PMS, Scount=="rep")
+PMS.r@sam_data$age_sampling
+PMS.r <- prune_taxa(taxa_sums(PMS.r)>0, PMS.r)
+PMS.r
+
+test <- PMS.r@sam_data %>%
+    group_by(hyena_ID) %>%
+    mutate(min_age=min(age_sampling),
+           n= n(),
+           max_age=max(age_sampling))
+
+all(test$Sample==PMS.r@sam_data$Sample)
+
+PMS.r@sam_data$TimeP <- 0
+PMS.r@sam_data$TimeP[test$age_sampling==test$min_age] <- 1
+PMS.r@sam_data$TimeP[test$age_sampling>test$min_age] <- 3
+PMS.r@sam_data$TimeP[test$age_sampling==test$max_age] <- 2
+
+# shannon diversity repeatability
+library(rptR)
+shannon <- vegan::diversity(PMS.r@otu_table, index = "shannon")  
+PMS.r@sam_data$shannon <- shannon
+metadf <- as.data.frame(PMS.r@sam_data)
+class(metadf) <- "data.frame"
+rpt(shannon~age_sampling+(1|hyena_ID), data=metadf, datatype = "Gaussian", nboot = 1000, npermut = 1000, grname=c("hyena_ID"))
+
+c("#a5c3ab", "#eac161")
+
+repeatedS <- ggplot(data=sample_data(PMS.r),
+                    aes(x=age_sampling,
+                        y=reorder(hyena_ID, age_sampling),
+                        group=hyena_ID,
+                        fill=age_sampling_cat))+
+    geom_line(size=0.5,alpha=0.5)+
+    geom_point(colour="black",pch=21,size=3)+
+    geom_vline(xintercept=730, colour="firebrick", size=2, alpha=0.5)+
+    ylab("Hyena ID")+
+    xlab("Age at sampling")+
+    scale_fill_manual(values=c("#a5c3ab", "#eac161"))+
+    theme_classic()+
+    theme(legend.position="none",
+          panel.grid.minor=element_blank(),
+          panel.background=element_blank(),
+          axis.line=element_line(colour="black"))+
+    theme(axis.text.y=element_blank(),
+          axis.ticks.y=element_blank())
+
+library("GUniFrac", lib="/usr/local/lib/R/site-library")
+
+jac <- vegdist(PMS.r@otu_table, method="jaccard")
+ait <- vegdist(PMS.r@otu_table, method="aitchison",
+                                 pseudocount=1)
+
+dICC(jac, strata=PMS.r@sam_data$hyena_ID)
+dICC(ait, strata=PMS.r@sam_data$hyena_ID)
+
+permajac <- adonis2(jac~
+                    PMS.r@sam_data$age_sampling+
+                    PMS.r@sam_data$hyena_ID,
+                    by="margin")
+permajac
+
+permaait <- adonis2(ait~
+                    PMS.r@sam_data$age_sampling+
+                    PMS.r@sam_data$hyena_ID,
+                    by="margin")
+
+permaait
+
+otu <- otu_table(PMS.r)
+colnames(otu) <- as.vector(tax_table(PMS.r)[,"Genus"])
+mds <- vegan::metaMDS(otu, distance="jaccard")
+#plot(mds)
+
+data.scores <- vegan::scores(mds)
+data.scores <- as.data.frame(data.scores$sites)
+data.scores$hyena_ID <- PMS.r@sam_data$hyena_ID
+data.scores$age_sampling <- PMS.r@sam_data$age_sampling
+data.scores$age_sampling_cat <- PMS.r@sam_data$age_sampling_cat
+head(data.scores)
+
+Jac_R <- ggplot(data.scores, aes(x=NMDS1, y=NMDS2, fill=age_sampling_cat))+
+    geom_point(size=3, shape=21)+
+    geom_line(aes(group=hyena_ID), colour="gray", alpha=0.8)+
+    scale_fill_manual(values=c("#a5c3ab", "#eac161"), labels=c("Adult", "Juvenile"))+
+    labs(fill="Age at sampling")+
+    theme_classic()+
+    theme(legend.position="none")
+
+### aitchison
+mds2 <- vegan::metaMDS(otu, distance="aitchison", pseudocount=1)
+#plot(mds2)
+
+data.scores2 <- vegan::scores(mds2)
+data.scores2 <- as.data.frame(data.scores2$sites)
+data.scores2$hyena_ID <- PMS.r@sam_data$hyena_ID
+data.scores2$age_sampling <- PMS.r@sam_data$age_sampling
+data.scores2$age_sampling_cat <- PMS.r@sam_data$age_sampling_cat
+head(data.scores)
+
+Ait_R <- ggplot(data.scores2, aes(x=NMDS1, y=NMDS2, fill=age_sampling_cat))+
+    geom_point(size=3, shape=21)+
+    geom_line(aes(group=hyena_ID), colour="gray", alpha=0.8)+
+    scale_fill_manual(values=c("#a5c3ab", "#eac161"), labels=c("Adult", "Juvenile"))+
+    labs(fill="Age at sampling")+
+    theme_classic()+
+    theme(legend.position="none")
+
+
+
+dis_R <- plot_grid(Jac_R, Ait_R, labels=c("b", "c"))
+Fig1 <- plot_grid(repeatedS, dis_R, ncol=1, labels=c("a", ""))
+
+ggsave("Figures/Figure1.pdf", Fig1, width = 170, height = 170, dpi = 300, units="mm") 
+
+

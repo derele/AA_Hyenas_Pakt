@@ -1,3 +1,134 @@
+## plotting
+## unique animals
+
+ID_df <- data.frame(ID=PMS@sam_data$hyena_ID, motherID=PMS@sam_data$genetic_mum, Clan=PMS@sam_data$Clan)
+ID_df <- (unique(ID_df))
+
+mother.df <- as.data.frame(table(mother.df$motherID))
+
+mother_hist <-
+    ggplot(mother.df, aes(x=Freq-1))+
+    geom_histogram()+
+    labs(x="Number of siblings", y="Individual count")+
+    theme_classic()
+
+Clan_df <- as.data.frame(table(ID_df$Clan))
+
+clan_hist <- ggplot(Clan_df, aes(y=Freq, x=Var1, color=Var1))+
+    geom_segment(data=Clan_df, aes(x=Var1, xend=Var1, y=0, yend=Freq),
+                 color="lightgray", size=3)+
+    geom_point(size=10)+
+    scale_color_manual(values = c("#D16103", "#52854C", "#293352"))+
+    geom_text(aes(label = Freq), color = "white", size = 3) +
+    labs(x="Clan", y="Individual count")+
+    guides(color="none")+
+    theme(legend.position="none")+
+    theme_classic()
+
+
+Rank.df <- data.frame(Rank=PMS@sam_data$CSocialRank)
+
+Rank_hist <-  
+    ggplot(Rank.df, aes(x=Rank))+
+    geom_histogram()+
+    labs(x="Social rank", y="Sample count")+
+    theme_classic()
+#hist(PMS@sam_data$CSocialRank)
+
+data.df <- data.frame(date_sampling=as.Date(PMS@sam_data$date_sampling,
+                                format='%m/%d/%Y'))
+
+
+Sampling_hist <- ggplot(data.df, aes(x=date_sampling))+
+    geom_histogram()+
+    scale_x_date(date_breaks="year", date_labels="%Y")+
+    labs(x="Year of sampling", y="Sample count")+
+    theme_classic()
+Sampling_hist
+
+
+FigureS1 <- plot_grid(mother_hist, clan_hist, Rank_hist, Sampling_hist, labels="auto")
+ggplot2::ggsave(file="Figures/FigureS1.pdf", FigureS1, width = 190, height = 150, dpi = 300, units="mm")
+
+
+test <- PMS@sam_data %>%
+    group_by(hyena_ID) %>%
+    mutate(min_age=min(age_sampling),
+           n= n(),
+           max_age=max(age_sampling))
+
+PMS@sam_data$TimeP <- 0
+PMS@sam_data$TimeP[test$age_sampling==test$min_age] <- 1
+PMS@sam_data$TimeP[test$age_sampling>test$min_age] <- 3
+PMS@sam_data$TimeP[test$age_sampling==test$max_age] <- 2
+
+repeatedS <- ggplot(data=sample_data(PMS),
+                    aes(x=age_sampling/365,
+                        y=reorder(hyena_ID, age_sampling),
+                        group=hyena_ID,
+                        fill=age_sampling_cat))+
+    geom_point(colour="white",pch=21,size=3, alpha=0.7)+
+    geom_line(size=0.5,alpha=0.5)+
+    geom_vline(xintercept=2, colour="firebrick", size=2, alpha=0.5)+
+    ylab("Hyena ID")+
+    xlab("Age at sampling (years)")+
+    scale_fill_manual(values=c("#a5c3ab", "#eac161"))+
+    scale_x_continuous(breaks=0:16)+
+    theme_classic()+
+    theme(legend.position="none",
+          panel.grid.minor=element_blank(),
+          panel.background=element_blank(),
+          axis.line=element_line(colour="black"))+
+    theme(axis.text.y=element_blank(),
+          axis.ticks.y=element_blank())
+
+
+IgA_hist <- ggplot(sample_data(PMS), aes(x=log(IgA)))+
+    geom_histogram()+
+#    scale_x_date(date_breaks="year", date_labels="%Y")+
+    labs(x="Faecal IgA (RU, log scale)", y="Sample count")+
+    theme_classic()
+
+mucin_hist <- ggplot(sample_data(PMS), aes(x=log(mucin)))+
+    geom_histogram()+
+#    scale_x_date(date_breaks="year", date_labels="%Y")+
+    labs(x="Faecal mucin (OE, log scale)", y="Sample count")+
+    theme_classic()
+
+
+
+Age_diff <- ggplot(data.dyad, aes(x=Age))+
+    geom_histogram()+
+#    scale_x_date(date_breaks="year", date_labels="%Y")+
+    labs(x="Age distance", y="Pair count")+
+    theme_classic()
+
+IgA_diff <- ggplot(data.dyad, aes(x=IgAP))+
+    geom_histogram()+
+#    scale_x_date(date_breaks="year", date_labels="%Y")+
+    labs(x="f-IgA distance", y="Pair count")+
+    theme_classic()
+
+Muc_diff <- ggplot(data.dyad, aes(x=MucinP))+
+    geom_histogram()+
+#    scale_x_date(date_breaks="year", date_labels="%Y")+
+    labs(x="f-mucin distance", y="Pair count")+
+    theme_classic()
+
+AgeSD <- plot_grid(repeatedS, Age_diff, nrow=1, rel_widths=c(1, 0.5), labels=c("a", "b"))
+
+ImmSD <- plot_grid(IgA_hist, mucin_hist, IgA_diff, Muc_diff, labels=c("c", "d", "e", "f"))
+
+FigureSD <- plot_grid(AgeSD, ImmSD, nrow=2)
+
+ggplot2::ggsave(file="Figures/FigureSD.pdf", FigureSD, width = 190, height = 190, dpi = 300, units="mm")
+
+plot_grid(Age_diff, IgA_diff, Muc_diff, nrow=1, labels=c("d", "e", "f"))
+
+hist(data.dyad$AgeDiff)
+
+
+##############
 otu <- otu_table(PMS)
 colnames(otu) <- as.vector(tax_table(PMS)[,"Genus"])
 mds <- vegan::metaMDS(otu, try=350, k=3)
@@ -152,8 +283,8 @@ PMS.r@sam_data$TimeP[test$age_sampling>test$min_age] <- 3
 PMS.r@sam_data$TimeP[test$age_sampling==test$max_age] <- 2
 
 
-temp <- as.data.frame(sample_data(PMS) %>% group_by(hyena_ID) %>%
-#                              sample_n(1)) #subset phyloseq object to one randomly selected sample 
+#temp <- as.data.frame(sample_data(PMS) %>% group_by(hyena_ID) %>%
+                              sample_n(1)) #subset phyloseq object to one randomly selected sample 
 #one.ps <- subset_samples(PMS, Sample%in%temp$Sample)
 #ps.core <- core(one.ps, detection = 0, prevalence = .3)
 #Core<- phyloseq::prune_taxa(taxa_names(PMS)%in%taxa_names(ps.core), PMS)
@@ -199,7 +330,7 @@ dICC(jac, strata=Core@sam_data$hyena_ID)
 dICC(ait, strata=Core@sam_data$hyena_ID)
 
 permajac <- adonis2(jac~
-                    Core@sam_data$age_sampling+
+                    Core@sam_data$age_sampling +
                     Core@sam_data$hyena_ID,
                     by="margin")
 permajac

@@ -21,15 +21,10 @@ library(dplyr)
 ## re-run or use pre-computed results for different parts of the pipeline:
 ## Set to FALSE to use pre-computed and saved results, TRUE to redo analyses.
 doQualEval <- TRUE
-
 doFilter <- TRUE
-
 doMultiAmpSort <- TRUE
-
 doMultiAmpError <- TRUE ## c("errEst", "direct")
-
 doMultiAmpPipe <- TRUE
-    
 doTax <- TRUE
 
 ###################Full run Microbiome#######################
@@ -705,8 +700,11 @@ for (i in 1:length(genus)){
 ### remove negative edges
     net=delete.edges(net.grph, which(E(net.grph)$weight<0)) # here's my condition.
 #plot(net,
-#     vertex.label="")
-    oc <- cluster_fast_greedy(net) # cluster
+                                        #     vertex.label="")
+    if(ncol(kaza)>100){
+        oc <- cluster_fast_greedy(net)} else {
+          oc <- cluster_optimal(net) # cluster
+          }
 # and now we merge based on the clustered modules
     group <- list()
     for (i in 1:length(levels(as.factor(oc$membership)))){
@@ -717,134 +715,29 @@ for (i in 1:length(genus)){
 
 TPMS
 
-get_taxa_unique(TPMS, "Order")
-
-get_taxa_unique(TPMS, "Genus")
-
-
 TPMS@tax_table[which(is.na(TPMS@tax_table[,6])),]
 
 which(is.na(TPMS@tax_table[,6]))
+## some manual adjustments
+TPMS@tax_table[76,]
+TPMS@tax_table[76,6] <- "Unknown_genus_in_Eukarya"
+TPMS@tax_table[76,5] <- "Unknown_family_in_Eukarya"
+TPMS@tax_table[76,2] <- "Unknown_phylum_in_Eukarya"
 
-TPMS@tax_table[80,]
-TPMS@tax_table[80,6] <- "Unknown_genus_in_Eukarya"
-TPMS@tax_table[80,5] <- "Unknown_family_in_Eukarya"
-TPMS@tax_table[80,2] <- "Unknown_phylum_in_Eukarya"
+TPMS@tax_table[171,]
+TPMS@tax_table[171,6] <- "Unknown_genus_in_Apicomplexa"
+TPMS@tax_table[171,5] <- "Unknown_family_in_Apicomplexa"
 
-TPMS@tax_table[166,]
-TPMS@tax_table[166,6] <- "Unknown_genus_in_Pleosporales"
-TPMS@tax_table[166,5] <- "Unknown_family_in_Pleosporales"
+TPMS@tax_table[724,]
+TPMS@tax_table[724,6] <- "Unknown_genus_in_Eukarya"
+TPMS@tax_table[724,5] <- "Unknown_family_in_Eukarya"
 
-TPMS@tax_table[178,]
-TPMS@tax_table[178,6] <- "Unknown_genus_in_Apicomplexa"
-TPMS@tax_table[178,5] <- "Unknown_family_in_Apicomplexa"
-
-TPMS@tax_table[475,]
-TPMS@tax_table[475,6] <- "Unknown_genus_in_Chlorophyceae"
-TPMS@tax_table[475,5] <- "Unknown_family_in_Chlorophyceae"
+TPMS@tax_table[972,]
+TPMS@tax_table[972,6] <- "Unknown_genus_in_Chlorophyceae"
+TPMS@tax_table[972,5] <- "Unknown_family_in_Chlorophyceae"
 
 
 which(is.na(TPMS@tax_table[,6]))
 
 # ok now I save and this is the table I will use.
 saveRDS(TPMS, "/SAN/Susanas_den/gitProj/AA_Hyenas_Pakt/tmp/fPMS.rds")
-
-
-###############################################################################
-############# I am ignorning from here on, will remove later
-### ONE DATASET to start with P --- ONLY MULTIAMPLICON FOR NOW
-
-### exclude super weird taxa
-P <- subset_taxa(PMS, superkingdom%in%c("Bacteria", "Eukaryota"))
-
-## Exclude off-target Eukaryote taxa 
-P <- subset_taxa(P, !phylum%in%c("Chordata",
-#                                 "Chlorophyta",
-                                 "Streptophyta"
-                                 ))
-
-PS <- tax_glom(PMS, "species")
-PG <- tax_glom(PMS, "genus")
-
-### SIX datasets to rule them all!!!
-PBac <- subset_taxa(P, superkingdom%in%c("Bacteria"))
-PEuk <- subset_taxa(P, superkingdom%in%c("Eukaryota"))
-
-PSBac <- subset_taxa(PS, superkingdom%in%c("Bacteria"))
-PSEuk <- subset_taxa(PS, superkingdom%in%c("Eukaryota"))
-
-PGBac <- subset_taxa(PG, superkingdom%in%c("Bacteria"))
-PGEuk <- subset_taxa(PG, superkingdom%in%c("Eukaryota"))
-
-
-
-library(phyloseq)
-EukTib <- as_tibble(psmelt(PSEuk))
-
-
-EukTib %>% filter(genus%in%"Ancylostoma") %>%
-    select(Abundance, Sample, OTU, Ancylostoma_egg_load) %>%
-    group_by(Sample) %>%
-    summarize(sumAbu=sum(Abundance),
-              Sample=unique(Sample),
-              AncyMic=unique(Ancylostoma_egg_load)
-              ) %>% na.omit() -> AncyloCorDat
-
-
-AncyloCorDat %>% select_if(is.numeric) %>% cor()
-
-nrow(AncyloCorDat)
-
-cor.test(AncyloCorDat$sumAbu, AncyloCorDat$AncyMic)
-
-summary(lm(log10(sumAbu+1)~log10(AncyMic+1), AncyloCorDat))
-
-pdf("Figures/Ancylostoma_Cor.pdf")
-ggplot(AncyloCorDat, aes(AncyMic+1, sumAbu+1)) +
-    geom_point() +
-    stat_smooth(method="lm") +
-    scale_y_log10("Ancylostoma sequence abundance") +
-    scale_x_log10("Ancylostoma egg load")
-dev.off()
-
-
-EukTib %>% filter(order%in%c("Eucoccidiorida")) %>% 
-    select(Abundance, Sample, OTU, Cystoisospora_oocyst_load) %>%
-    group_by(Sample) %>%
-    summarize(sumAbu=sum(Abundance),
-              Sample=unique(Sample),
-              CystoMic=unique(Cystoisospora_oocyst_load)
-              ) %>% na.omit() -> CoccidiaCorDat
-
-CoccidiaCorDat %>% select_if(is.numeric) %>% cor()
-
-pdf("Figures/Coccidia_Cor.pdf")
-CoccidiaCorDat %>%
-    ggplot(aes(CystoMic+1, sumAbu+1)) +
-    geom_point() +
-    stat_smooth(method="lm") +
-    scale_y_log10("Coccidia sequence abundance") +
-    scale_x_log10("Cystoisospora oocyst load")
-dev.off()
-
-cor.test(CoccidiaCorDat$CystoMic, CoccidiaCorDat$sumAbu, method="spearman")
-
-EukTib %>% filter(genus%in%"Cystoisospora") %>% 
-    select(Abundance, Sample, OTU, Cystoisospora_oocyst_load) %>%
-    group_by(Sample) %>%
-    summarize(sumAbu=sum(Abundance),
-              Sample=unique(Sample),
-              CytoMic=unique(Cystoisospora_oocyst_load)
-              ) %>% na.omit() -> CystoisoCorDat
-
-pdf("Figures/Cystoisospora_Cor.pdf")
-CystoisoCorDat %>%
-    ggplot(aes(CytoMic+1, sumAbu+1)) +
-    geom_point() +
-    stat_smooth(method="lm") +
-    scale_y_log10("Cytoisospora sequence abundance") +
-    scale_x_log10("Cystoisospora oocyst load")
-dev.off()
-
-cor.test(CystoisoCorDat$CytoMic, CystoisoCorDat$sumAbu, method="spearman")
-
